@@ -142,8 +142,6 @@ Edit your OpenClaw config (`~/.openclaw/.openclaw/openclaw.json`):
 }
 ```
 
-> ⚠️ **Note:** OpenClaw can only have one memory plugin active at a time. TMR will replace any existing memory plugin (like mem0).
-
 #### 6. Create Required Directories
 
 ```bash
