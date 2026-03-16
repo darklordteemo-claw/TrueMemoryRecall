@@ -75,7 +75,9 @@ def extract_conversations():
         # Extract with Gemini
         logger.info(f"Extracting knowledge graph...")
         
-        api_key = "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"
+        # Load API key from environment or use default
+        import os
+        api_key = os.environ.get('OPENROUTER_API_KEY', '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')
         extractor = GeminiExtractor(api_key=api_key)
         graph = extractor.extract_graph(conversation, str(file_path))
         
