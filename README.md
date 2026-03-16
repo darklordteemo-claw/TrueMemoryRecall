@@ -41,6 +41,179 @@ cp -r . ~/.openclaw/extensions/TrueMemoryRecall
 
 ---
 
+## 🔧 OpenClaw Installation Guide
+
+### Prerequisites
+
+1. **OpenClaw Gateway** installed and running
+2. **Qdrant** running locally (or accessible remotely):
+   ```bash
+   docker run -p 6333:6333 qdrant/qdrant
+   ```
+3. **Python 3.10+** with pip
+
+### Step-by-Step Setup
+
+#### 1. Clone and Install
+
+```bash
+git clone https://github.com/TeemoAI/TrueMemoryRecall.git
+cd TrueMemoryRecall
+
+# Install Python dependencies
+pip install qdrant-client pyyaml
+```
+
+#### 2. Copy to OpenClaw Extensions
+
+```bash
+# Create extensions directory if it doesn't exist
+mkdir -p ~/.openclaw/extensions
+
+# Copy TMR to OpenClaw
+cp -r TrueMemoryRecall ~/.openclaw/extensions/
+
+# Verify structure
+ls ~/.openclaw/extensions/TrueMemoryRecall/
+# Should show: index.ts, src/, scripts/, config/, etc.
+```
+
+#### 3. Configure API Keys
+
+Edit `~/.openclaw/extensions/TrueMemoryRecall/config/plugin.yaml`:
+
+```yaml
+openrouter:
+  # Get your API key from https://openrouter.ai/keys
+  # We recommend creating a separate key for TMR to track costs
+  api_key: "sk-or-v1-YOUR_API_KEY_HERE"
+  model: "google/gemini-2.0-flash-lite-001"
+
+qdrant:
+  host: "localhost"
+  port: 6333
+  # If using remote Qdrant:
+  # url: "https://your-qdrant-instance.com"
+  # api_key: "your-qdrant-api-key"
+
+tmr:
+  extraction_schedule: "0 12,0 * * *"  # 12PM and 12AM
+  thresholds:
+    recent: 0.85   # 0-7 days: high confidence
+    medium: 0.70   # 7-30 days: medium confidence
+    old: 0.60      # 30+ days: lower threshold
+```
+
+#### 4. Set Up Cron (Optional but Recommended)
+
+**Option A: System Cron**
+```bash
+# Edit crontab
+crontab -e
+
+# Add these lines for twice-daily extraction
+0 12 * * * /usr/bin/python3 ~/.openclaw/extensions/TrueMemoryRecall/scripts/twice-daily-extract.py >> ~/.openclaw/extensions/TrueMemoryRecall/logs/cron.log 2>&1
+0 0 * * * /usr/bin/python3 ~/.openclaw/extensions/TrueMemoryRecall/scripts/twice-daily-extract.py >> ~/.openclaw/extensions/TrueMemoryRecall/logs/cron.log 2>&1
+```
+
+**Option B: OpenClaw Cron (if available)**
+```bash
+# Copy job definitions
+cp ~/.openclaw/extensions/TrueMemoryRecall/config/cron-jobs.json ~/.openclaw/.openclaw/cron/jobs.json
+```
+
+#### 5. Configure OpenClaw Memory Slot
+
+Edit your OpenClaw config (`~/.openclaw/.openclaw/openclaw.json`):
+
+```json
+{
+  "plugins": {
+    "slots": {
+      "memory": "true-memory-recall"
+    },
+    "entries": {
+      "true-memory-recall": {
+        "path": "~/.openclaw/extensions/TrueMemoryRecall/index.ts",
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+> ⚠️ **Note:** OpenClaw can only have one memory plugin active at a time. TMR will replace any existing memory plugin (like mem0).
+
+#### 6. Create Required Directories
+
+```bash
+# Create data directories
+mkdir -p ~/.openclaw/workspace/memory/raw
+mkdir -p ~/.openclaw/workspace/memory/graph
+mkdir -p ~/.openclaw/extensions/TrueMemoryRecall/logs
+```
+
+#### 7. Restart OpenClaw
+
+```bash
+# Option 1: Using the safe restart script
+cd ~/.openclaw/extensions/TrueMemoryRecall
+python3 scripts/trigger_restart.py --confirm
+
+# Option 2: Manual restart
+systemctl --user restart openclaw-gateway
+# or
+openclaw gateway restart
+```
+
+#### 8. Verify Installation
+
+Check the logs to confirm TMR loaded:
+```bash
+tail -f /tmp/openclaw/openclaw-$(date +%Y-%m-%d).log | grep -i "TMR"
+```
+
+You should see:
+```
+[TMR] Plugin registered
+[TMR] Plugin initialized
+```
+
+Send a test message and verify it's captured:
+```bash
+tail ~/.openclaw/workspace/memory/raw/$(date +%Y-%m-%d).md
+```
+
+---
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "Plugin not loading" | Check `openclaw.json` path is correct and absolute |
+| "Qdrant connection failed" | Verify Qdrant is running: `curl http://localhost:6333` |
+| "No messages being saved" | Check file permissions on `memory/raw/` directory |
+| "Extraction not running" | Check cron is set up and script is executable |
+| "API key errors" | Verify key in `config/plugin.yaml` is valid |
+
+---
+
+### Customization
+
+**Change extraction frequency:**
+Edit `scripts/twice-daily-extract.py` or modify your cron schedule.
+
+**Adjust thresholds:**
+Higher values = more selective injection. Lower values = more aggressive.
+
+**Use different model:**
+Update `config/plugin.yaml` with any OpenRouter model ID.
+
+**Custom data directory:**
+Modify `index.ts` and Python files to change `RAW_DIR` and `graph_dir`.
+
+---
+
 ## 🏗️ Architecture
 
 ```
