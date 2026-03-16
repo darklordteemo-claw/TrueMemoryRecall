@@ -75,9 +75,12 @@ def extract_conversations():
         # Extract with Gemini
         logger.info(f"Extracting knowledge graph...")
         
-        # Load API key from environment or use default
+        # Load API key from environment
         import os
-        api_key = os.environ.get('OPENROUTER_API_KEY', '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')
+        api_key = os.environ.get('OPENROUTER_API_KEY')
+        if not api_key:
+            logger.error("OPENROUTER_API_KEY environment variable not set. Skipping.")
+            continue
         extractor = GeminiExtractor(api_key=api_key)
         graph = extractor.extract_graph(conversation, str(file_path))
         
