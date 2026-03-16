@@ -1,0 +1,49 @@
+# TrueMemoryRecall (TMR) Plugin Configuration
+
+# Storage settings
+storage:
+  raw_dir: "~/.openclaw/workspace/memory/raw"
+  graph_dir: "~/.openclaw/workspace/memory/graph"
+  
+# Qdrant connection (reuse existing)
+qdrant:
+  host: "localhost"
+  port: 6333
+  collections:
+    conversations: "tmr_conversations"
+    line_index: "tmr_line_index"
+    knowledge_graph: "tmr_knowledge_graph"
+
+# Filter settings
+filter:
+  min_length: 10
+  drop_patterns:
+    - "^hi$"
+    - "^ok$"
+    - "^yes$"
+    - "^no$"
+    - "^hm$"
+    - "^hmm$"
+    - "^hello$"
+    - "^hey$"
+    - "^yo$"
+    - "^wait$"
+    - "^umm?$"
+    - "^like$"
+    - "^so$"
+    - "^btw$"
+
+# Daily extraction settings
+extraction:
+  enabled: true
+  model: "google/gemini-2.0-flash-lite-001"
+  time: "03:00"
+  timezone: "Asia/Kolkata"
+  # Separate API key for TMR cost tracking
+  api_key: "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"
+
+# Auto-inject settings
+injection:
+  enabled: true
+  max_relations: 5
+  min_strength: 0.5

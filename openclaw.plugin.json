@@ -1,0 +1,14 @@
+{
+  "id": "true-memory-recall",
+  "kind": "memory",
+  "entry": "dist/index.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "pythonPath": { "type": "string", "default": "python3" },
+      "pluginDir": { "type": "string" },
+      "autoCapture": { "type": "boolean", "default": true },
+      "autoRecall": { "type": "boolean", "default": true }
+    }
+  }
+}

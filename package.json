@@ -1,0 +1,20 @@
+{
+  "name": "true-memory-recall",
+  "version": "1.0.0",
+  "description": "TMR - captures webchat conversations to markdown files",
+  "main": "./index.ts",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openclaw": "^2026.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "TrueMemoryRecall",
+  "version": "1.0.0",
+  "description": "TMR - Raw conversation storage + Cognee-style knowledge graph extraction with auto-inject",
+  "author": "Liz",
+  "entry": "src/plugin.py",
+  "hooks": {
+    "message_received": "on_message_received",
+    "context_build": "on_context_build"
+  },
+  "config": "config/plugin.yaml",
+  "cron": [
+    {
+      "schedule": "0 3 * * *",
+      "script": "scripts/daily_process.py",
+      "description": "Daily knowledge graph extraction"
+    }
+  ]
+}
