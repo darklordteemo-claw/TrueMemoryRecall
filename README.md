@@ -151,7 +151,7 @@ User: "Where should I eat?"
   ↓ [Inject with adaptive threshold]
 
 [RELATED MEMORY - TMR]
-1. Uddipta → LIKES → Marcello's (95%)
+1. User → LIKES → Marcello's (95%)
    Source: memory/raw/2026-03-16.md:45
 [END RELATED MEMORY]
 ```
@@ -188,18 +188,18 @@ python3 -m pytest tests/test_storage.py -v
 
 ### Daily Conversation File
 ```markdown
-[14:32:15] Uddipta: thinking about the memory system
+[14:32:15] User: thinking about the memory system
 [14:33:22] Liz: what aspect?
-[14:35:47] Uddipta: how to make it cheaper
+[14:35:47] User: how to make it cheaper
 ```
 
 ### Knowledge Graph
 ```json
 {
   "date": "2026-03-16",
-  "entities": ["Uddipta", "memory systems"],
+  "entities": ["User", "memory systems"],
   "relations": [{
-    "subject": "Uddipta",
+    "subject": "User",
     "relation": "DISCUSSED",
     "object": "memory systems",
     "strength": 0.75,

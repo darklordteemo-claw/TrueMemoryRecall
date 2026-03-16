@@ -102,9 +102,9 @@ def test_storage():
         
         # Test 1: Store messages
         print("\nTest 1: Storing messages...")
-        line1_start, line1_end = storage.store_message("14:32:15", "Uddipta", "im thinking about the memory system")
+        line1_start, line1_end = storage.store_message("14:32:15", "User", "im thinking about the memory system")
         line2_start, line2_end = storage.store_message("14:33:22", "Liz", "yeah what aspect are you considering")
-        line3_start, line3_end = storage.store_message("14:35:47", "Uddipta", "how do we make it cheaper")
+        line3_start, line3_end = storage.store_message("14:35:47", "User", "how do we make it cheaper")
         
         print(f"  Message 1: lines {line1_start}-{line1_end}")
         print(f"  Message 2: lines {line2_start}-{line2_end}")
@@ -128,9 +128,9 @@ def test_storage():
         lines = content.split('\n')
         
         checks = [
-            (line1_start, "[14:32:15] Uddipta: im thinking about the memory system"),
+            (line1_start, "[14:32:15] User: im thinking about the memory system"),
             (line2_start, "[14:33:22] Liz: yeah what aspect are you considering"),
-            (line3_start, "[14:35:47] Uddipta: how do we make it cheaper"),
+            (line3_start, "[14:35:47] User: how do we make it cheaper"),
         ]
         
         all_passed = True

@@ -32,9 +32,9 @@ def test_integration():
     # Test 1: Store a message
     print("\n2. Testing message storage...")
     test_messages = [
-        ("Uddipta", "im testing the TMR memory system", "11:30:00"),
+        ("User", "im testing the TMR memory system", "11:30:00"),
         ("Liz", "great, let's see if it works", "11:30:05"),
-        ("Uddipta", "where should we eat later? im hungry", "11:31:00"),
+        ("User", "where should we eat later? im hungry", "11:31:00"),
     ]
     
     stored = 0

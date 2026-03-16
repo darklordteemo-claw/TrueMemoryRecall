@@ -91,8 +91,8 @@ class ContextInjector:
         """
         all_relations = []
         
-        # Always include Uddipta relations (assuming that's the user)
-        default_entities = ['uddipta', 'user']
+        # Always include User relations (assuming that's the user)
+        default_entities = ['user', 'user']
         query_entities = list(set(query_entities + default_entities))
         
         for graph in graphs:
@@ -232,10 +232,10 @@ def test_injector():
             "date": today.strftime('%Y-%m-%d'),
             "source_file": "memory/raw/2026-03-16.md",
             "extraction_cost": {"total_tokens": 1000},
-            "entities": ["Uddipta", "Liz", "Marcello's", "carbonara", "Spice Palace"],
+            "entities": ["User", "Liz", "Marcello's", "carbonara", "Spice Palace"],
             "relationships": [
                 {
-                    "subject": "Uddipta",
+                    "subject": "User",
                     "relation": "LIKES",
                     "object": "Marcello's",
                     "strength": 0.95,
@@ -243,7 +243,7 @@ def test_injector():
                     "source": {"file": "memory/raw/2026-03-16.md", "line_start": 45}
                 },
                 {
-                    "subject": "Uddipta",
+                    "subject": "User",
                     "relation": "DISLIKES",
                     "object": "spicy food",
                     "strength": 0.90,
@@ -251,7 +251,7 @@ def test_injector():
                     "source": {"file": "memory/raw/2026-03-16.md", "line_start": 52}
                 },
                 {
-                    "subject": "Uddipta",
+                    "subject": "User",
                     "relation": "DISCUSSED",
                     "object": "memory systems",
                     "strength": 0.75,
@@ -315,7 +315,7 @@ def test_injector():
         no_match_query = "What's the weather today?"
         no_match_context = injector.inject_context(no_match_query)
         
-        # The injector now includes 'uddipta' by default, so it will find matches
+        # The injector now includes 'user' by default, so it will find matches
         # This is actually correct behavior - user's past conversations are relevant
         if no_match_context:
             print(f"  ✅ Found user context for: \"{no_match_query}\"")

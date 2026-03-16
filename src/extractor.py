@@ -169,11 +169,11 @@ def test_extractor():
     conversation = """1. # 2026-03-10 — Auto-generated
 2. # Line numbers for reference
 3. 
-4. [18:30] Uddipta: hey liz im hungry but dunno what to eat
-5. [18:31] Uddipta: hmm not sure. went to that italian place last week. marcello's i think?
-6. [18:32] Uddipta: yea the carbonara was so good. wanna go there again
-7. [18:33] Uddipta: nah not feeling veggie tonight. oh wait i had bad experience at spice palace last month
-8. [18:35] Uddipta: cool lets do that. making reservation now"""
+4. [18:30] User: hey liz im hungry but dunno what to eat
+5. [18:31] User: hmm not sure. went to that italian place last week. marcello's i think?
+6. [18:32] User: yea the carbonara was so good. wanna go there again
+7. [18:33] User: nah not feeling veggie tonight. oh wait i had bad experience at spice palace last month
+8. [18:35] User: cool lets do that. making reservation now"""
     
     print("\nTest 1: Extracting knowledge graph...")
     print("  This uses the TMR-specific OpenRouter API key")
@@ -208,7 +208,7 @@ def test_extractor():
     entities = [e.lower() for e in graph.get("entities", [])]
     
     checks = [
-        ("Uddipta" in entities or "uddipta" in entities, "Found Uddipta"),
+        ("User" in entities or "user" in entities, "Found User"),
         ("marcello" in str(entities), "Found Marcello's"),
         ("spice palace" in str(entities), "Found Spice Palace"),
         ("carbonara" in str(entities), "Found carbonara"),

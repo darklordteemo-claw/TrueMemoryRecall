@@ -168,11 +168,11 @@ def test_daily_processing():
         sample_conversation = f"""# {yesterday.date()} — Auto-generated
 # Line numbers for reference
 
-[14:32:15] Uddipta: im thinking about the memory system we discussed
+[14:32:15] User: im thinking about the memory system we discussed
 [14:33:22] Liz: yeah what aspect are you considering
-[14:35:47] Uddipta: how do we make it cheaper without losing quality
+[14:35:47] User: how do we make it cheaper without losing quality
 [14:36:00] Liz: lets explore some options
-[14:38:10] Uddipta: what if we use files instead of database
+[14:38:10] User: what if we use files instead of database
 [14:40:30] Liz: that could work for simplicity
 """
         

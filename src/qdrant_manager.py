@@ -165,7 +165,7 @@ def test_qdrant_connection():
         file_path=test_file,
         line_number=test_line,
         timestamp="14:32:15",
-        speaker="Uddipta",
+        speaker="User",
         byte_offset=150
     )
     
@@ -176,7 +176,7 @@ def test_qdrant_connection():
         info = manager.get_line_info(test_file, test_line)
         if info:
             print(f"  ✅ Retrieved: {info}")
-            if info.get("speaker") == "Uddipta" and info.get("timestamp") == "14:32:15":
+            if info.get("speaker") == "User" and info.get("timestamp") == "14:32:15":
                 print("  ✅ Data matches")
             else:
                 print("  ❌ Data mismatch")

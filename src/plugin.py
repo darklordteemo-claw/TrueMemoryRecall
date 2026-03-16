@@ -85,7 +85,7 @@ class QMDMemoryPlugin:
         Hook: Called when a new message is received.
         
         Args:
-            speaker: Who sent the message (e.g., "Uddipta", "Liz")
+            speaker: Who sent the message (e.g., "User", "Liz")
             message: The message content
             timestamp: Optional timestamp (default: now)
         
@@ -188,11 +188,11 @@ filter:
         # Test 2: Process messages
         print("\nTest 2: Processing messages...")
         messages = [
-            ("Uddipta", "hi", "14:30:00"),  # Should be filtered
-            ("Uddipta", "im thinking about the memory system", "14:32:15"),  # Store
+            ("User", "hi", "14:30:00"),  # Should be filtered
+            ("User", "im thinking about the memory system", "14:32:15"),  # Store
             ("Liz", "ok", "14:32:20"),  # Filtered
             ("Liz", "yeah what aspect are you considering", "14:33:22"),  # Store
-            ("Uddipta", "how do we make it cheaper without losing quality", "14:35:47"),  # Store
+            ("User", "how do we make it cheaper without losing quality", "14:35:47"),  # Store
         ]
         
         stored_count = 0
@@ -229,17 +229,17 @@ filter:
         print(f"  File has {len(lines)} lines")
         
         # Check that we have the right messages
-        has_uddipta_msg = any("im thinking about the memory system" in line for line in lines)
+        has_user_msg = any("im thinking about the memory system" in line for line in lines)
         has_liz_msg = any("yeah what aspect are you considering" in line for line in lines)
         
-        if has_uddipta_msg and has_liz_msg:
+        if has_user_msg and has_liz_msg:
             print("  ✅ Correct messages stored")
         else:
             print("  ❌ Missing expected messages")
             return False
         
         # Verify filtered messages NOT in file
-        has_hi = any(line.strip() == "[14:30:00] Uddipta: hi" for line in lines)
+        has_hi = any(line.strip() == "[14:30:00] User: hi" for line in lines)
         has_ok = any(line.strip() == "[14:32:20] Liz: ok" for line in lines)
         
         if not has_hi and not has_ok:
@@ -250,9 +250,9 @@ filter:
         
         # Test 4: Verify Qdrant indexing
         print("\nTest 4: Verifying Qdrant indexing...")
-        info = plugin.qdrant.get_line_info(str(file_path), 4)  # Line 4 should be first Uddipta msg
+        info = plugin.qdrant.get_line_info(str(file_path), 4)  # Line 4 should be first User msg
         
-        if info and info.get('speaker') == 'Uddipta':
+        if info and info.get('speaker') == 'User':
             print(f"  ✅ Qdrant index: {info}")
         else:
             print("  ❌ Qdrant indexing failed")

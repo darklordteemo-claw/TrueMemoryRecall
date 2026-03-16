@@ -44,7 +44,7 @@ const tmrPlugin = {
       
       if (!cleanContent) return;
       
-      const line = `[${timestamp}] Uddipta: ${cleanContent.substring(0, 2000)}\n`;
+      const line = `[${timestamp}] User: ${cleanContent.substring(0, 2000)}\n`;
       
       try {
         fs.appendFileSync(rawFile, line, "utf8");
