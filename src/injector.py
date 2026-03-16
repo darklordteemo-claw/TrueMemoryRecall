@@ -86,17 +86,37 @@ class ContextInjector:
                                graphs: List[Dict],
                                max_results: int = 5) -> List[Dict]:
         """
-        Find relations related to query entities.
-        Returns relations sorted by strength (highest first).
+        Find relations related to query entities with adaptive thresholds.
+        Recent memories need higher confidence, older memories can have lower threshold.
         """
+        from datetime import datetime
+        
         all_relations = []
         
         # Always include User relations (assuming that's the user)
         default_entities = ['user', 'user']
         query_entities = list(set(query_entities + default_entities))
         
+        today = datetime.now()
+        
         for graph in graphs:
-            for rel in graph.get('relationships', []):
+            # Calculate age of this graph
+            graph_date_str = graph.get('source_date', today.strftime('%Y-%m-%d'))
+            try:
+                graph_date = datetime.strptime(graph_date_str, '%Y-%m-%d')
+                age_days = (today - graph_date).days
+            except:
+                age_days = 0
+            
+            # Adaptive threshold based on age
+            if age_days <= 7:
+                min_threshold = 0.85  # Recent: high confidence required
+            elif age_days <= 30:
+                min_threshold = 0.70  # Medium: good confidence
+            else:
+                min_threshold = 0.60  # Old: lower bar but still decent
+            
+            for rel in graph.get('relations', []):
                 # Check if relation matches any query entity
                 subject = rel.get('subject', '').lower()
                 obj = rel.get('object', '').lower()
@@ -126,10 +146,19 @@ class ContextInjector:
                     rel_copy = rel.copy()
                     rel_copy['match_score'] = score
                     rel_copy['source_date'] = graph.get('source_date', 'unknown')
-                    all_relations.append(rel_copy)
+                    rel_copy['age_days'] = age_days
+                    rel_copy['min_threshold'] = min_threshold
+                    
+                    # Calculate combined score
+                    combined_score = rel.get('strength', 0) * score
+                    rel_copy['combined_score'] = combined_score
+                    
+                    # Only include if meets threshold for its age
+                    if combined_score >= min_threshold:
+                        all_relations.append(rel_copy)
         
-        # Sort by: strength * match_score (prioritize strong, relevant relations)
-        all_relations.sort(key=lambda r: r.get('strength', 0) * r.get('match_score', 1), reverse=True)
+        # Sort by combined score (strength * relevance)
+        all_relations.sort(key=lambda r: r.get('combined_score', 0), reverse=True)
         
         return all_relations[:max_results]
     
