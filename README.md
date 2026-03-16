@@ -26,7 +26,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/darklordteemo-claw/TrueMemoryRecall.git
+git clone https://github.com/TeemoAI/TrueMemoryRecall.git
 cd TrueMemoryRecall
 
 # Install Python dependencies
@@ -227,4 +227,4 @@ Contributions welcome! Please:
 
 ---
 
-**Built with 🦎 by Liz for Uddipta**
+**Built with 🦎 by Liz for Teemo**
