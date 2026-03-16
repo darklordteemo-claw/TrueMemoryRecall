@@ -1,197 +1,230 @@
-# TrueMemoryRecall (TMR) Plugin - Complete
+# TrueMemoryRecall (TMR) 🧠
 
-**Status:** Phase 1, 2, 3 Complete ✅  
-**Total Tests:** 33/33 passing  
-**Cost:** Tracked under separate TMR OpenRouter API key
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-33%2F33%20passing-brightgreen)]()
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)]()
+[![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)]()
 
----
+> OpenClaw memory plugin with knowledge graphs — auto-capture, auto-extract, auto-inject.
 
-## What Was Built
-
-### Core Components
-
-| Component | File | Purpose | Tests |
-|-----------|------|---------|-------|
-| **Filter** | `src/filter.py` | Drop "hi", "ok", keep meaningful messages | 14/14 ✅ |
-| **Storage** | `src/storage.py` | Daily files with line tracking | 4/4 ✅ |
-| **Qdrant Manager** | `src/qdrant_manager.py` | Vector DB connection & indexing | 5/5 ✅ |
-| **Extractor** | `src/extractor.py` | Gemini Flash Lite knowledge graph extraction | 3/3 ✅ |
-| **Injector** | `src/injector.py` | Auto-inject Cognee relations + references | 3/3 ✅ |
-| **Plugin Core** | `src/plugin.py` | Integration & OpenClaw hooks | 4/4 ✅ |
-
-### Scripts
-
-| Script | File | Purpose |
-|--------|------|---------|
-| **Daily Process** | `scripts/daily_process.py` | Cron job for nightly extraction |
-
-### Configuration
-
-| File | Purpose |
-|------|---------|
-| `manifest.json` | OpenClaw plugin registration |
-| `config/plugin.yaml` | User configuration + TMR API key |
+**Zero LLM cost** during real-time storage. **Twice-daily** knowledge graph extraction.
 
 ---
 
-## How It Works
+## 🚀 Features
 
-### 1. Auto-Extract (Real-time)
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Auto-Capture** | ✅ Ready | Messages saved to daily markdown files |
+| **Auto-Extract** | ✅ Ready | Twice-daily knowledge graph via Gemini |
+| **Auto-Inject** | ✅ Ready | Context injection with adaptive thresholds |
+| **Smart Restart** | ✅ Ready | Delayed gateway restart with completion marker |
+
+---
+
+## 📦 Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/darklordteemo-claw/TrueMemoryRecall.git
+cd TrueMemoryRecall
+
+# Install Python dependencies
+pip install qdrant-client pyyaml
+
+# Copy to OpenClaw extensions
+cp -r . ~/.openclaw/extensions/TrueMemoryRecall
+
+# Configure your API key in config/plugin.yaml
+# Then restart OpenClaw
 ```
-User: "im thinking about the memory system"
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    OpenClaw Gateway                         │
+├─────────────────────────────────────────────────────────────┤
+│  TypeScript Layer (Hooks)          Python Layer (Logic)     │
+│  ┌─────────────────────┐          ┌──────────────────┐     │
+│  │ message_received    │─────────▶│ filter.py        │     │
+│  │ agent_end           │─────────▶│ storage.py       │     │
+│  │ before_agent_start  │◀─────────│ injector.py      │     │
+│  └─────────────────────┘          └────────┬─────────┘     │
+│                                            │               │
+│  ┌─────────────────────────────────────────▼─────────────┐ │
+│  │              Qdrant Vector Database                   │ │
+│  │  ┌─────────────┐  ┌──────────┐  ┌─────────────────┐  │ │
+│  │  │conversations│  │line_index│  │knowledge_graph  │  │ │
+│  │  └─────────────┘  └──────────┘  └─────────────────┘  │ │
+│  └───────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📂 File Structure
+
+```
+TrueMemoryRecall/
+├── index.ts                    # OpenClaw plugin entry
+├── src/
+│   ├── plugin.py              # Main Python entry
+│   ├── filter.py              # Message filtering (14 tests)
+│   ├── storage.py             # Daily file storage (4 tests)
+│   ├── qdrant_manager.py      # Vector DB (5 tests)
+│   ├── extractor.py           # Gemini extraction (3 tests)
+│   └── injector.py            # Context injection (3 tests)
+├── scripts/
+│   ├── daily_process.py       # Cron extraction script
+│   ├── twice-daily-extract.py # 12PM + 12AM extraction
+│   ├── restart-gateway.sh     # Safe restart helper
+│   └── trigger_restart.py     # Restart trigger
+├── config/
+│   └── plugin.yaml            # Configuration + API keys
+└── tests/                     # 33 tests total
+```
+
+**Data Storage:**
+```
+~/.openclaw/workspace/memory/
+├── raw/                       # Daily conversation files
+│   └── YYYY-MM-DD.md
+└── graph/                     # Knowledge graphs
+    └── YYYY-MM-DD.json
+```
+
+---
+
+## ⚙️ Configuration
+
+Create `config/plugin.yaml`:
+
+```yaml
+openrouter:
+  api_key: "sk-or-v1-..."      # Your TMR-specific API key
+  model: "google/gemini-2.0-flash-lite-001"
+
+qdrant:
+  host: "localhost"
+  port: 6333
+  collections:
+    prefix: "tmr_"
+
+tmr:
+  extraction_schedule: "0 12,0 * * *"  # 12PM & 12AM
+  thresholds:
+    recent: 0.85    # 0-7 days
+    medium: 0.70    # 7-30 days
+    old: 0.60       # 30+ days
+```
+
+---
+
+## 🔄 How It Works
+
+### 1. Auto-Capture (Real-time, Zero LLM Cost)
+```
+User: "thinking about the memory system"
   ↓ [Filter] ✅ Keep (10+ chars, not filler)
-  ↓ [Storage] Append to memory/raw/2026-03-16.md, line 4
-  ↓ [Qdrant] Index: file + line 4 + speaker + timestamp
+  ↓ [Storage] Append to memory/raw/2026-03-16.md
+  ↓ [Qdrant] Index with line reference
 ```
 
-### 2. Daily Batch (3 AM)
+### 2. Auto-Extract (Twice Daily)
 ```
 Read: memory/raw/2026-03-16.md
-  ↓ [Gemini] Extract entities & relationships
+  ↓ [Gemini Flash Lite] Extract entities & relations
   ↓ [Save] memory/graph/2026-03-16.json
-  ↓ [Qdrant] Store relations for fast lookup
+  ↓ [Qdrant] Store for fast lookup
 
-Cost: ~$0.000003 per day (tracked under TMR API key)
+Cost: ~$0.000003 per extraction
 ```
 
 ### 3. Auto-Inject (Every Query)
 ```
 User: "Where should I eat?"
-  ↓ [Analyze] Extract entities: ["food", "restaurant", "eat"]
-  ↓ [Search] Find matching relations in Qdrant
-  ↓ [Inject]
+  ↓ [Analyze] Extract entities
+  ↓ [Search] Find matching relations
+  ↓ [Inject with adaptive threshold]
 
 [RELATED MEMORY - TMR]
-1. Uddipta → LIKES → Marcello's (confidence: 95%)
-   Evidence: "yea the carbonara was so good"
+1. Uddipta → LIKES → Marcello's (95%)
    Source: memory/raw/2026-03-16.md:45
-
-2. Uddipta → DISLIKES → spicy food (confidence: 90%)
-   Evidence: "bad experience at spice palace"
-   Source: memory/raw/2026-03-16.md:52
 [END RELATED MEMORY]
-
-Me: "How about Marcello's? You loved the carbonara there..."
 ```
 
 ---
 
-## File Structure
+## 🧪 Testing
 
-```
-~/.openclaw/extensions/TrueMemoryRecall/
-├── manifest.json              # Plugin manifest
-├── config/
-│   └── plugin.yaml           # Config + TMR API key
-├── src/
-│   ├── __init__.py
-│   ├── plugin.py             # Main entry + hooks
-│   ├── filter.py             # Message filtering
-│   ├── storage.py            # Daily file storage
-│   ├── qdrant_manager.py     # Qdrant connection
-│   ├── extractor.py          # Gemini extraction
-│   └── injector.py           # Context injection
-└── scripts/
-    └── daily_process.py      # Cron script
+```bash
+# Run all tests
+python3 -m pytest tests/ -v
 
-~/.openclaw/workspace/memory/
-├── raw/                      # Daily conversation files
-│   ├── 2026-03-16.md
-│   └── ...
-└── graph/                    # Extracted knowledge graphs
-    ├── 2026-03-16.json
-    └── ...
+# Test specific module
+python3 -m pytest tests/test_filter.py -v
+python3 -m pytest tests/test_storage.py -v
 ```
 
----
-
-## Qdrant Collections
-
-| Collection | Purpose |
-|------------|---------|
-| `tmr_conversations` | Vector embeddings for semantic search |
-| `tmr_line_index` | Line number → byte offset mapping |
-| `tmr_knowledge_graph` | Extracted relations with references |
+**Results:** 33/33 passing
 
 ---
 
-## Cost Tracking
+## 💰 Cost Tracking
 
-**TMR-specific OpenRouter API Key:**
-- Key: `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`
-- Model: `google/gemini-2.0-flash-lite-001`
-- Cost per extraction: ~$0.000003 (3 millionths of a dollar)
-- Monthly estimate: <$0.50
-
----
-
-## Test Results Summary
-
-```
-Filter Tests:        14/14 ✅
-Storage Tests:        4/4  ✅
-Qdrant Tests:         5/5  ✅
-Plugin Integration:   4/4  ✅
-Extractor Tests:      3/3  ✅
-Injector Tests:       3/3  ✅
-─────────────────────────────
-TOTAL:               33/33 ✅
-```
+| Operation | Cost | Frequency |
+|-----------|------|-----------|
+| Real-time capture | $0.00 | Every message |
+| Knowledge graph extraction | ~$0.000003 | Twice daily |
+| Context injection | $0.00 | Every query |
+| **Monthly estimate** | **<$0.50** | - |
 
 ---
 
-## Next Steps (Manual/OpenClaw Integration)
+## 📋 Sample Output
 
-To fully activate:
-
-1. **OpenClaw Plugin Registration**
-   - Copy `TrueMemoryRecall` to OpenClaw's extensions folder
-   - Restart OpenClaw to load plugin
-
-2. **Cron Setup**
-   - Add to OpenClaw's cron: `0 3 * * * scripts/daily_process.py`
-   - Or use system cron
-
-3. **Test End-to-End**
-   - Send messages, verify they appear in daily file
-   - Wait for daily extraction (or run manually)
-   - Query and verify auto-inject works
-
----
-
-## Sample Output
-
-### Daily File (`memory/raw/2026-03-16.md`)
+### Daily Conversation File
 ```markdown
-# 2026-03-16 — Auto-generated
-# Line numbers for reference
-
-[14:32:15] Uddipta: im thinking about the memory system we discussed
-[14:33:22] Liz: yeah what aspect are you considering
-[14:35:47] Uddipta: how do we make it cheaper without losing quality
+[14:32:15] Uddipta: thinking about the memory system
+[14:33:22] Liz: what aspect?
+[14:35:47] Uddipta: how to make it cheaper
 ```
 
-### Knowledge Graph (`memory/graph/2026-03-16.json`)
+### Knowledge Graph
 ```json
 {
   "date": "2026-03-16",
-  "source_file": "memory/raw/2026-03-16.md",
-  "extraction_cost": {"total_tokens": 1200},
-  "entities": ["Uddipta", "Liz", "memory systems"],
-  "relationships": [
-    {
-      "subject": "Uddipta",
-      "relation": "DISCUSSED",
-      "object": "memory systems",
-      "strength": 0.75,
-      "evidence": "im thinking about the memory system",
-      "source": {"file": "memory/raw/2026-03-16.md", "line_start": 4}
-    }
-  ]
+  "entities": ["Uddipta", "memory systems"],
+  "relations": [{
+    "subject": "Uddipta",
+    "relation": "DISCUSSED",
+    "object": "memory systems",
+    "strength": 0.75,
+    "source": {"file": "memory/raw/2026-03-16.md", "line": 1}
+  }]
 }
 ```
 
 ---
 
-**Built by Liz 🦎 for Uddipta**  
-**Status: Ready for OpenClaw integration** ✅
+## 🤝 Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing`)
+5. Open a Pull Request
+
+---
+
+## 📝 License
+
+[MIT](LICENSE) © 2026 True Memory Recall Contributors
+
+---
+
+**Built with 🦎 by Liz for Uddipta**
