@@ -57,9 +57,22 @@ def extract_conversations():
         
         # Check if already extracted
         graph_file = graph_dir / f"{date.strftime('%Y-%m-%d')}.json"
-        if graph_file.exists():
-            logger.info(f"Already extracted for {date.date()}, skipping")
-            continue
+        hash_file = graph_dir / f"{date.strftime('%Y-%m-%d')}.hash"
+        
+        # Calculate current file hash
+        import hashlib
+        with open(file_path, 'rb') as f:
+            current_hash = hashlib.md5(f.read()).hexdigest()
+        
+        # Skip only if hash matches (file unchanged)
+        if graph_file.exists() and hash_file.exists():
+            with open(hash_file, 'r') as f:
+                stored_hash = f.read().strip()
+            if stored_hash == current_hash:
+                logger.info(f"Already extracted for {date.date()} (no changes), skipping")
+                continue
+            else:
+                logger.info(f"Raw file changed for {date.date()}, re-extracting...")
         
         logger.info(f"\nProcessing: {file_path}")
         
@@ -94,6 +107,11 @@ def extract_conversations():
         with open(graph_file, 'w', encoding='utf-8') as f:
             json.dump(graph, f, indent=2)
         logger.info(f"Saved graph to: {graph_file}")
+        
+        # Save hash for change detection
+        with open(hash_file, 'w') as f:
+            f.write(current_hash)
+        logger.info(f"Saved file hash to: {hash_file}")
         
         # Store in Qdrant
         import uuid
