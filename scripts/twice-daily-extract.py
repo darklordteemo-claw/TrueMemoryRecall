@@ -96,12 +96,15 @@ def extract_conversations():
         logger.info(f"Saved graph to: {graph_file}")
         
         # Store in Qdrant
+        import uuid
+        base_id = int(date.strftime('%Y%m%d')) * 10000  # Base for this date
         for i, rel in enumerate(graph.get('relations', [])):
             try:
+                point_id = base_id + i  # Integer ID
                 qdrant.client.upsert(
                     collection_name=qdrant.collections["knowledge_graph"],
                     points=[{
-                        "id": f"{date.strftime('%Y%m%d')}_{i}",
+                        "id": point_id,
                         "vector": [0.0],
                         "payload": rel
                     }]
