@@ -40,8 +40,8 @@ extraction:
   time: "03:00"
   timezone: "Asia/Kolkata"
   # API key for Gemini extraction
-  # Set via environment: export OPENROUTER_API_KEY="your-key-here"
-  api_key: "${OPENROUTER_API_KEY}"
+  # Set via environment: export TMR_API_KEY="your-key-here"
+  api_key: "${TMR_API_KEY}"
 
 # Auto-inject settings
 injection:

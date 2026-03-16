@@ -80,13 +80,25 @@ ls ~/.openclaw/extensions/TrueMemoryRecall/
 
 #### 3. Configure API Keys
 
-Edit `~/.openclaw/extensions/TrueMemoryRecall/config/plugin.yaml`:
+**Set the TMR_API_KEY environment variable:**
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc for persistence
+export TMR_API_KEY="sk-or-v1-your-key-here"
+
+# Or set temporarily for current session
+export TMR_API_KEY="sk-or-v1-your-key-here"
+```
+
+Get your API key from: https://openrouter.ai/keys
+
+**Optional: Edit `~/.openclaw/extensions/TrueMemoryRecall/config/plugin.yaml`:**
 
 ```yaml
 openrouter:
-  # Get your API key from https://openrouter.ai/keys
-  # We recommend creating a separate key for TMR to track costs
-  api_key: "sk-or-v1-YOUR_API_KEY_HERE"
+  # Uses TMR_API_KEY env var by default
+  # Or set explicitly here (not recommended for security)
+  api_key: "${TMR_API_KEY}"
   model: "google/gemini-2.0-flash-lite-001"
 
 qdrant:

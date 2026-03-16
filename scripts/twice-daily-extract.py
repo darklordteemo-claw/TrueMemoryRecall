@@ -77,9 +77,9 @@ def extract_conversations():
         
         # Load API key from environment
         import os
-        api_key = os.environ.get('OPENROUTER_API_KEY')
+        api_key = os.environ.get('TMR_API_KEY') or os.environ.get('OPENROUTER_API_KEY')
         if not api_key:
-            logger.error("OPENROUTER_API_KEY environment variable not set. Skipping.")
+            logger.error("TMR_API_KEY or OPENROUTER_API_KEY environment variable not set. Skipping.")
             continue
         extractor = GeminiExtractor(api_key=api_key)
         graph = extractor.extract_graph(conversation, str(file_path))
