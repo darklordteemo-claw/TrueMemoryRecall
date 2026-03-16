@@ -2,25 +2,48 @@
 node_modules/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
 .pytest_cache/
+.coverage
+htmlcov/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
 
 # Logs
 logs/*.log
 *.log
+npm-debug.log*
 
 # Data (don't commit user data)
 data/
+*.db
+*.sqlite
+
+# Environment
+.env
+.env.local
+.venv/
+venv/
 
 # OS
 .DS_Store
 Thumbs.db
+*.pem
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # Temporary files
 /tmp/
 *.tmp
+.cache/
