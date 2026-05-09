@@ -75,7 +75,7 @@ TMR V1 stores everything in one layer. Raw triples in, raw triples out. This mea
 | **P3** | **LLM is last resort** | Heuristics handle 90% of cases. Only call LLM for genuine ambiguity. |
 | **P4** | **Layer 2 is regenerable** | Bug in consolidation? Fix + regenerate. Zero data loss. |
 | **P5** | **Profiles over flat facts** | User + Agent + Relationship profiles capture more than triples ever could. |
-| **P6** | **Self-improving without AI** | Feedback uses keyword-overlap heuristic. No LLM call per feedback cycle. |
+| **P6** | **Self-improving via Gemma 4 cron** | Feedback loop uses local model hourly. No AI at query time. Human reviews and decides. |
 
 ---
 
@@ -405,32 +405,155 @@ def format_tier2(m):
 
 ---
 
-## 13. FEEDBACK LOOP
+## 13. FEEDBACK LOOP (GEMMA 4 CRON, NO AI AT QUERY TIME)
 
-### 13.1 Query-Time Tracking (No AI)
+### 13.1 Architecture
 
-After injection, record:
-- `injection_count` += 1
-- `last_injected_at` = now
-- Check if response keywords overlap memory entities (simple keyword match)
+The feedback loop has two parts:
+1. **Query-time tracking** — zero cost. Just writes a temp JSON file.
+2. **Gemma 4 scoring** — runs hourly via cron. Local model, no API cost.
 
-If **zero overlap** after 3 consecutive injections → mark for demotion.
+```
+Query time (no AI):
+├─ User asks question
+├─ Script injects memories into context
+├─ AI responds
+└─ Script writes temp file: temp/feedback/TIMESTAMP-uuid.json
 
-### 13.2 Consolidation-Time Application
-
-During daily consolidation:
-```python
-for m in Layer2:
-    if m.consecutive_misses > 3:
-        m.usage_frequency = max(0.1, m.usage_frequency - 0.2)
-        m.consecutive_misses = 0
-    elif m.injection_count > 5 and m.consecutive_misses < 2:
-        m.usage_frequency = min(1.0, m.usage_frequency + 0.1)
+Every 1h (cron):
+├─ scripts/feedback_scorer.py runs
+├─ Reads all temp/feedback/*.json files
+├─ For each: asks Gemma 4 "Was this memory relevant?"
+├─ Gemma returns score (0.0-1.0) + one-sentence reasoning
+├─ Saves to logs/feedback_scored/YYYY-MM-DD/ (permanent record)
+└─ Deletes temp files (only scored data remains)
 ```
 
-### 13.3 Trade-off
+### 13.2 Temp File (Query-Time Write)
 
-**Not perfect** — keyword overlap ≠ "was useful." But it's **free** and better than nothing. Phase 2 can add lightweight NLP (spaCy) without LLM cost.
+```json
+{
+  "timestamp": "2026-05-09T21:00:00Z",
+  "query": "Fix the TMR extractor",
+  "injected_memory": "User prefers VS Code",
+  "response": "I'll open the editor for you",
+  "memory_source": "memory/raw/2026-05-09.md:42",
+  "scored": false
+}
+```
+
+### 13.3 Gemma 4 Scoring Prompt
+
+```
+Query: "Fix the TMR extractor"
+Response: "I'll open the editor for you"
+Memory: "User prefers VS Code"
+
+Was this memory relevant to answering the query?
+Score 0.0 to 1.0 where 0 = confused response, 1 = directly useful.
+Give one-sentence reason.
+
+Format:
+Score: 0.6
+Reason: Sets coding context but doesn't directly help fix the extractor.
+```
+
+Gemma 4 is ~1B parameters via Ollama. ~50-100ms per inference. No network calls.
+
+### 13.4 Scored File Format (Permanent)
+
+```json
+{
+  "timestamp": "2026-05-09T21:00:00Z",
+  "query": "Fix the TMR extractor",
+  "injected_memory": "User prefers VS Code",
+  "response": "I'll open the editor for you",
+  "memory_source": "memory/raw/2026-05-09.md:42",
+  "gemma_score": 0.6,
+  "gemma_reasoning": "Sets coding context but doesn't directly help fix the extractor.",
+  "model": "gemma4:1b",
+  "processed_at": "2026-05-09T22:00:00Z",
+  "human_override": null
+}
+```
+
+### 13.5 Why Gemma 4 Beats Keywords
+
+| Approach | Example | Result |
+|----------|---------|--------|
+| **Keyword matching** | "VS Code" vs "editor" → no match | ❌ Wrongly scores 0.0 |
+| **Gemma 4** | Understands "editor" = "VS Code" | ✅ Scores 0.6 (context-relevant) |
+
+Gemma 4 is tiny but understands word relationships. Good enough for this.
+
+### 13.6 Human Review
+
+```bash
+# Review last 7 days, sorted by lowest scores
+python scripts/review_feedback.py --since 7d --sort score_asc
+```
+
+Shows:
+```
+Low-scored memories (Gemma < 0.3):
+─────────────────────────────────────
+1. "User lives in Europe" → 0.0
+   Query: "Fix the TMR extractor"
+   Reason: "Completely irrelevant to technical debugging"
+   → [Suppress] [Keep] [Override: ___]
+
+2. "User discussed TMR memory injection" → 0.1
+   Query: "Fix the TMR extractor"
+   Reason: "Generic discussion, not actionable"
+   → [Suppress] [Keep] [Override: ___]
+```
+
+**You always have final say.** Gemma pre-filters. You decide.
+
+### 13.7 Adjustable Model Size
+
+Since we store both temp files **and** Gemma-scored results, you can:
+1. **Start with Gemma 4 1B** — fast, cheap, handles obvious cases
+2. **Upgrade to Gemma 4 4B or 27B** — if 1B misses subtle relevance
+3. **Compare models** — run multiple models on same files, pick best
+4. **Override any score** — human judgment wins
+
+### 13.8 Score Application (Manual Default)
+
+**Mode A (Manual — default):**
+- You review weekly
+- You manually adjust memory scores in Layer 2
+- Zero automation risk
+
+**Mode B (Semi-Auto — Phase 3):**
+- Gemma < 0.2 for 30 days → suggest suppression
+- You approve or deny
+
+**Mode C (Auto — never default):**
+- Only after months of proven Mode A/B reliability
+
+### 13.9 Directory Structure
+
+```
+~/.openclaw/extensions/TrueMemoryRecall/
+├── temp/
+│   └── feedback/              # Unscored — cleared after cron
+├── logs/
+│   └── feedback_scored/       # Permanent Gemma-scored records
+│       └── 2026-05-09/
+│           └── 21-00-uuid.json
+```
+
+### 13.10 Cost
+
+| Model | Per-Inference | 100 Memories/Day | Daily Cost |
+|-------|:-------------:|:----------------:|:----------:|
+| Gemma 4 1B | 50-100ms CPU | ~10 sec total | Zero (local) |
+| Gemma 4 4B | 200-400ms | ~40 sec total | Zero (local) |
+| Gemma 4 27B | 2-5s | ~5 min total | Zero (local, needs GPU) |
+
+Compare to **GPT-4/Claude API**: $0.0001-0.01 per call. 100 calls/day = $0.01-1/day.
+Local Gemma = **$0 forever.**
 
 ---
 
@@ -482,10 +605,10 @@ This section exists because Uddipta asked me to **scrutinize my own plan** befor
 **Reality:** Prompt changes risk degrading extraction quality. Current triples are acceptable.  
 **Fix:** Entity typing happens in consolidation, not extraction. Extractor stays unchanged for Phase 1.
 
-### Gap 5: Feedback Loop Required AI
+### Gap 5: Feedback Loop Required AI at Query Time
 **First draft:** Suggested comparing injection to response using LLM. ❌  
 **Reality:** Violates "no AI at query time" principle.  
-**Fix:** Keyword-overlap heuristic. Imperfect but free. See [Feedback Loop](#13-feedback-loop).
+**Fix:** Gemma 4 cron-based scoring. Query time only writes temp files (zero cost). Hourly cron uses local Gemma 4 to score relevance. See [Feedback Loop](#13-feedback-loop).
 
 ### Gap 6: No Fallback Strategy
 **First draft:** Search Layer 2 only. ❌ What if Layer 2 is empty or corrupted?  
