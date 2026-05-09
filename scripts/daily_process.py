@@ -6,6 +6,7 @@ Processes yesterday's conversation and extracts knowledge graph
 
 import sys
 import json
+import uuid
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from storage import DailyStorage
 from qdrant_manager import QdrantManager
-from extractor import GeminiExtractor
+from extractor import QwenExtractor
 
 
 def process_daily_extraction():
@@ -78,23 +79,31 @@ def process_daily_extraction():
     # Extract knowledge graph using Gemini
     print(f"\n  Extracting knowledge graph with Gemini...")
     
-    # Load API key from config
+    # Load API key from config or environment
     config_path = Path(__file__).parent.parent / 'config' / 'plugin.yaml'
     api_key = None
     try:
         import yaml
+        import os
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
             api_key = config.get('extraction', {}).get('api_key')
+            # Expand environment variables if present
+            if api_key and api_key.startswith('${') and api_key.endswith('}'):
+                env_var = api_key[2:-1]
+                api_key = os.environ.get(env_var)
+            # Fallback to OPENROUTER_API_KEY env var
+            if not api_key:
+                api_key = os.environ.get('OPENROUTER_API_KEY')
     except Exception as e:
         print(f"  ⚠️  Could not load config: {e}")
         return False
     
     if not api_key:
-        print("  ❌ No API key found in config")
+        print("  ❌ No API key found in config or OPENROUTER_API_KEY env var")
         return False
     
-    extractor = GeminiExtractor(api_key=api_key)
+    extractor = QwenExtractor(api_key=api_key)
     graph = extractor.extract_graph(conversation, str(file_path))
     
     if not graph:
@@ -103,7 +112,7 @@ def process_daily_extraction():
     
     print(f"  ✅ Extraction successful")
     print(f"     Entities: {len(graph.get('entities', []))}")
-    print(f"     Relationships: {len(graph.get('relationships', []))}")
+    print(f"     Relationships: {len(graph.get('relations', []))}")
     
     # Save graph to file
     graph_file = graph_dir / f"{yesterday.strftime('%Y-%m-%d')}.json"
@@ -113,9 +122,9 @@ def process_daily_extraction():
     
     # Store in Qdrant for fast lookup
     print(f"\n  Storing in Qdrant...")
-    for i, rel in enumerate(graph.get('relationships', [])):
+    for i, rel in enumerate(graph.get('relations', [])):
         # Create a unique ID for each relationship
-        rel_id = f"{yesterday.strftime('%Y%m%d')}_{i}"
+        rel_id = str(uuid.uuid4())
         
         # Store in knowledge_graph collection
         try:
@@ -130,7 +139,7 @@ def process_daily_extraction():
         except Exception as e:
             print(f"  ⚠️  Failed to store relation {i}: {e}")
     
-    print(f"  ✅ Stored {len(graph.get('relationships', []))} relations in Qdrant")
+    print(f"  ✅ Stored {len(graph.get('relations', []))} relations in Qdrant")
     
     # Print cost info
     cost = graph.get('extraction_cost', {})

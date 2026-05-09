@@ -15,56 +15,99 @@ sys.path.insert(0, str(Path(__file__).parent))
 from filter import MessageFilter
 from storage import DailyStorage
 from qdrant_manager import QdrantManager
-from injector import ContextInjector
+# Use new v2 injector with full Cognee pipeline
+from tmr_injector import TMRCogneeInjector
+from message_buffer import buffer_message
+from config_loader import get_config
 
 
 import logging
 from datetime import datetime
+import pytz
 
-# Set up logging
+# IST timezone for all logging (as requested by user)
+IST = pytz.timezone('Asia/Kolkata')
+
+class ISTFormatter(logging.Formatter):
+    """Custom formatter that uses IST timezone"""
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, IST)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime('%Y-%m-%d %H:%M:%S') + ' IST'
+
+# Set up logging with IST timezone
 plugin_dir = Path(__file__).parent.parent
 logs_dir = plugin_dir / 'logs'
 logs_dir.mkdir(exist_ok=True)
 
+formatter = ISTFormatter('%(asctime)s - TMR - %(levelname)s - %(message)s')
+
+file_handler = logging.FileHandler(logs_dir / 'tmr.log')
+file_handler.setFormatter(formatter)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - TMR - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(logs_dir / 'tmr.log'),
-        logging.StreamHandler()
-    ]
+    handlers=[file_handler, stream_handler]
 )
 logger = logging.getLogger('TMR')
 
 
 class QMDMemoryPlugin:
-    """Main plugin class for TrueMemoryRecall (TMR)"""
-    
+    """Main plugin class for TrueMemoryRecall (TMR) v2"""
+
     def __init__(self, config_path: str = None):
         """Initialize plugin with configuration"""
         self.config = self._load_config(config_path)
-        
+
         # Initialize components
         self.filter = MessageFilter(
             min_length=self.config.get('filter', {}).get('min_length', 10)
         )
-        
+
         self.storage = DailyStorage(
             raw_dir=self.config.get('storage', {}).get('raw_dir', '~/.openclaw/workspace/memory/raw')
         )
-        
+
         self.qdrant = QdrantManager(
             host=self.config.get('qdrant', {}).get('host', 'localhost'),
             port=self.config.get('qdrant', {}).get('port', 6333)
         )
-        
+
         # Initialize Qdrant collections
         self.qdrant.init_collections(vector_size=768)
-        
-        # Initialize injector for context building
-        self.injector = ContextInjector(
-            graph_dir=self.config.get('storage', {}).get('graph_dir', '~/.openclaw/workspace/memory/graph')
+
+        # Initialize NEW v2 injector with full Cognee pipeline
+        logger.info("Initializing TMR v2 Cognee-Style Injector...")
+        self.injector = TMRCogneeInjector(
+            graph_dir=self.config.get('storage', {}).get('graph_dir', '~/.openclaw/workspace/memory/graph'),
+            enable_feedback=True
         )
+        logger.info("TMR v2 Injector initialized")
+
+    def _load_config(self, config_path: str = None) -> dict:
+        """Load configuration from YAML file"""
+        import yaml
+
+        # Try new config first, fall back to old
+        if config_path is None:
+            new_config_path = Path(__file__).parent.parent / 'config' / 'tmr_config.yaml'
+            old_config_path = Path(__file__).parent.parent / 'config' / 'plugin.yaml'
+
+            if new_config_path.exists():
+                config_path = new_config_path
+            else:
+                config_path = old_config_path
+
+        try:
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"Warning: Could not load config from {config_path}: {e}")
+            return {}
     
     def _load_config(self, config_path: str = None) -> dict:
         """Load configuration from YAML file"""
@@ -83,43 +126,40 @@ class QMDMemoryPlugin:
     def on_message_received(self, speaker: str, message: str, timestamp: str = None) -> bool:
         """
         Hook: Called when a new message is received.
-        
+
         Args:
             speaker: Who sent the message (e.g., "User", "Liz")
             message: The message content
             timestamp: Optional timestamp (default: now)
-        
+
         Returns:
             True if message was stored, False if filtered out
         """
         if timestamp is None:
             timestamp = datetime.now().strftime("%H:%M:%S")
-        
+
         # Step 1: Filter
         logger.info(f"Processing message from {speaker}: {message[:50]}...")
         should_store, reason = self.filter.should_store(message)
-        
+
         if not should_store:
             logger.info(f"Filtered out: {reason}")
             return False
-        
-        # Step 2: Store to daily file
+
+        # Step 2: Buffer for v2 real-time system (chunked files)
+        try:
+            flushed = buffer_message(speaker, message)
+            if flushed:
+                logger.info(f"Message buffer flushed (size/time/session trigger)")
+        except Exception as e:
+            logger.warning(f"Message buffering failed: {e}")
+
+        # Step 3: Also store to daily file (backward compatibility)
         logger.info(f"Storing message to daily file...")
-        line_start, line_end = self.storage.store_message(timestamp, speaker, message)
-        logger.info(f"Stored at line {line_start}")
-        
-        # Step 3: Index in Qdrant
-        file_path = str(self.storage._get_daily_file_path())
-        logger.info(f"Indexing in Qdrant: {file_path}:{line_start}")
-        self.qdrant.store_line_index(
-            file_path=file_path,
-            line_number=line_start,
-            timestamp=timestamp,
-            speaker=speaker,
-            byte_offset=0  # TODO: Calculate actual byte offset
-        )
-        logger.info(f"Successfully indexed in Qdrant")
-        
+        line_start, line_end, byte_offset = self.storage.store_message(timestamp, speaker, message)
+        logger.info(f"Stored at line {line_start}, byte offset {byte_offset}")
+
+        # Note: Qdrant indexing happens during batch extraction (every 2 hours), not real-time
         return True
     
     def on_context_build(self, query: str) -> str:
@@ -133,18 +173,94 @@ class QMDMemoryPlugin:
         Returns:
             Context string to add to LLM context (or empty string)
         """
-        logger.info(f"Building context for query: {query[:50]}...")
+        # Extract actual user message from prompt (remove system metadata)
+        clean_query = query
+        if 'Sender (untrusted metadata):' in query:
+            # Find the actual message after the metadata block
+            parts = query.split('[Tue ')
+            if len(parts) > 1:
+                # Extract message after the timestamp line
+                message_parts = parts[1].split('\n', 1)
+                if len(message_parts) > 1:
+                    clean_query = message_parts[1].strip()
+        
+        # Log full query clearly
+        logger.info("=" * 70)
+        logger.info("[TMR] USER QUERY:")
+        logger.info("=" * 70)
+        for line in clean_query.split('\n'):
+            logger.info(f"[TMR]   {line}")
+        logger.info("=" * 70)
         
         if not self.config.get('injection', {}).get('enabled', True):
-            logger.info("Injection disabled in config")
+            logger.info("[TMR] Injection disabled in config")
             return ""
         
         context = self.injector.inject_context(query)
         
         if context:
-            logger.info(f"Injected context with {context.count('Source:')} relations")
+            # Save staging file for auto-feedback evaluating post-agent response
+            if hasattr(self.injector, 'last_retrieval_metadata'):
+                plugin_dir = Path(__file__).resolve().parent.parent
+                staging_path = plugin_dir / 'logs' / 'pending_feedback.json'
+                try:
+                    import json
+                    staging_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(staging_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.injector.last_retrieval_metadata, f, indent=2)
+                    logger.info(f"[TMR] Staged retrieval metadata for auto-feedback: {staging_path.name}")
+                except Exception as e:
+                    logger.error(f"[TMR] Failed to stage feedback metadata: {e}")
+
+            # Parse individual memories from context for detailed logging
+            logger.info("[TMR] SEARCHING memories...")
+            logger.info("-" * 70)
+            
+            memories = []
+            lines = context.split('\n')
+            current_source = ""
+            
+            for line in lines:
+                # Track source type
+                if 'From previous conversations:' in line:
+                    current_source = 'conversations'
+                elif 'From workspace context files:' in line:
+                    current_source = 'context_file'
+                elif 'Source:' in line or 'from:' in line.lower():
+                    # Extract source file info
+                    pass
+                elif line.strip().startswith(('1.', '2.', '3.', '4.', '5.')) and '→' in line:
+                    # This is a memory entry like "1. Subject → RELATION → Object"
+                    mem_match = line.strip()
+                    memories.append({'line': mem_match, 'source': current_source})
+                    logger.info(f"[TMR] [FOUND] {mem_match} (from: {current_source})")
+            
+            if memories:
+                logger.info("-" * 70)
+                logger.info(f"[TMR] [FOUND] {len(memories)} memories total")
+            else:
+                logger.info("[TMR] [FOUND] Context injected but no individual memories parsed")
+            
+            logger.info("-" * 70)
+            logger.info(f"[TMR] [INJECTED] {len(context)} characters")
+            logger.info("=" * 70)
+            
+            # Also write to a separate injection log file for easy viewing (in plugin logs dir)
+            try:
+                injection_detail_file = plugin_dir / 'logs' / 'tmr_injection_detail.log'
+                with open(injection_detail_file, 'a', encoding='utf-8') as f:
+                    f.write(f"\n{'='*70}\n")
+                    f.write(f"QUERY: {clean_query[:500]}\n")
+                    f.write(f"{'='*70}\n")
+                    f.write(f"INJECTED CONTEXT ({len(context)} chars):\n")
+                    f.write(context)
+                    f.write(f"\n{'='*70}\n\n")
+            except Exception:
+                pass  # Don't fail if can't write detail log
+            
         else:
-            logger.info("No relevant context found for injection")
+            logger.info("[TMR] [NO MEMORY] No relevant memory found for this query")
+            logger.info("=" * 70)
         
         return context
     
@@ -250,12 +366,12 @@ filter:
         
         # Test 4: Verify Qdrant indexing
         print("\nTest 4: Verifying Qdrant indexing...")
-        info = plugin.qdrant.get_line_info(str(file_path), 4)  # Line 4 should be first User msg
+        info = plugin.qdrant.get_line_info(str(file_path), 1)  # Line 1 should be first User msg
         
         if info and info.get('speaker') == 'User':
             print(f"  ✅ Qdrant index: {info}")
         else:
-            print("  ❌ Qdrant indexing failed")
+            print(f"  ❌ Qdrant indexing failed (got: {info})")
             return False
         
         plugin.close()
@@ -294,6 +410,46 @@ def main():
         # Called by TypeScript after_agent_end hook
         try:
             messages = json.loads(args.capture)
+            
+            # ── AUTO-FEEDBACK: Analyze response against injected memories ──
+            try:
+                from ai_feedback_generator import auto_feedback_after_response
+                
+                # Read staged retrieval metadata from inject phase
+                staging_path = plugin_dir / 'logs' / 'pending_feedback.json'
+                if staging_path.exists():
+                    with open(staging_path, 'r', encoding='utf-8') as f:
+                        staging = json.load(f)
+                    
+                    event_id = staging.get('event_id')
+                    query = staging.get('query', '')
+                    memories_injected = staging.get('memories_injected', [])
+                    
+                    # Find assistant's response in messages
+                    assistant_response = ""
+                    for msg in reversed(messages):
+                        if msg.get('role') == 'assistant':
+                            assistant_response = msg.get('content', '')
+                            break
+                    
+                    if event_id and assistant_response and memories_injected:
+                        logger.info(f"[TMR] Auto-feedback: analyzing response for event {event_id[:8]}...")
+                        auto_feedback_after_response(
+                            query=query,
+                            memories_injected=memories_injected,
+                            ai_response=assistant_response,
+                            event_id=event_id,
+                            injector=plugin.injector
+                        )
+                        logger.info("[TMR] Auto-feedback complete")
+                    
+                    # Clean up staging file so we don't re-process
+                    staging_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning(f"[TMR] Auto-feedback failed: {e}")
+            # ── END AUTO-FEEDBACK ──
+            
+            # Normal message capture/storage
             for msg in messages:
                 speaker = msg.get('role', 'Unknown')
                 content = msg.get('content', '')

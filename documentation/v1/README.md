@@ -319,11 +319,11 @@ User: "thinking about the memory system"
 ### 2. Auto-Extract (Twice Daily)
 ```
 Read: memory/raw/2026-03-16.md
-  ↓ [Gemini Flash Lite] Extract entities & relations
+  ↓ [Qwen 3.5 Flash] Extract entities & relations
   ↓ [Save] memory/graph/2026-03-16.json
   ↓ [Qdrant] Store for fast lookup
 
-Cost: ~$0.000003 per extraction
+Cost: ~$0.00001 per extraction
 ```
 
 ### 3. Auto-Inject (Every Query)
@@ -400,6 +400,19 @@ Contributions welcome! Please:
 2. Create a feature branch (`git checkout -b feature/amazing`)
 3. Commit changes (`git commit -m 'Add amazing feature'`)
 4. Push to branch (`git push origin feature/amazing`)
+5. Open a Pull Request
+
+---
+
+## 📝 License
+
+[MIT](LICENSE) © 2026 True Memory Recall Contributors
+
+---
+
+**Built with 🦎 by Liz for Teemo**
+for Teemo**
+mazing`)
 5. Open a Pull Request
 
 ---

@@ -1,0 +1,13 @@
+# TMR v2 Cron Jobs
+# Extract knowledge graphs incrementally (only what's new/changed)
+# Uses incremental_extractor.py which tracks hashes to avoid reprocessing
+
+# Every 2 hours: Incremental extraction (only new/changed raw files)
+0 */2 * * * cd /home/openclaw/.openclaw/extensions/TrueMemoryRecall && /home/linuxbrew/.linuxbrew/bin/python3 scripts/incremental_extractor.py >> logs/extraction.log 2>&1
+
+# Daily at 3 AM: Full re-extraction of ALL files (regenerate complete graph)
+0 3 * * * cd /home/openclaw/.openclaw/extensions/TrueMemoryRecall && /home/linuxbrew/.linuxbrew/bin/python3 scripts/incremental_extractor.py --force >> logs/daily_extraction.log 2>&1
+
+# Note: Compaction-triggered extraction is handled by the plugin's
+# before_compaction hook in index.ts, which runs incremental_extractor.py
+# automatically whenever a session compacts.

@@ -8,7 +8,7 @@ storage:
 # Qdrant connection (reuse existing)
 qdrant:
   host: "localhost"
-  port: 6333
+  port: "6333"
   collections:
     conversations: "tmr_conversations"
     line_index: "tmr_line_index"
@@ -36,15 +36,40 @@ filter:
 # Daily extraction settings
 extraction:
   enabled: true
-  model: "google/gemini-2.0-flash-lite-001"
+  model: "qwen/qwen3.5-flash-02-23"
   time: "03:00"
   timezone: "Asia/Kolkata"
-  # API key for Gemini extraction
-  # Set via environment: export TMR_API_KEY="your-key-here"
-  api_key: "${TMR_API_KEY}"
+  # API key for extraction (OpenRouter)
+  # Set via environment: export OPENROUTER_API_KEY="your-key-here"
+  # Or create .env file in plugin root directory
+  api_key: "${OPENROUTER_API_KEY}"
 
 # Auto-inject settings
 injection:
   enabled: true
   max_relations: 5
   min_strength: 0.5
+
+# Embedding settings (local Ollama)
+embeddings:
+  provider: "ollama"  # Options: ollama, fallback
+  model: "nomic-embed-text"  # 768-dim embeddings, fast & local
+  host: "http://localhost:11434"
+  vector_size: 768
+  batch_size: 32
+  # Graceful fallback to keyword hashing if Ollama unavailable
+  fallback_enabled: true
+
+# Semantic search settings
+semantic_search:
+  enabled: true
+  collection: "tmr_semantic_vectors"
+  # Search parameters
+  top_k: 10  # Number of results to retrieve
+  min_score: 0.6  # Minimum similarity score (0-1)
+  # Hybrid search: combine semantic + keyword scores
+  hybrid_alpha: 0.7  # Weight for semantic (0=keyword only, 1=semantic only)
+  # Boost recent relations
+  recency_boost: true
+  recency_days: 7
+  recency_multiplier: 1.2

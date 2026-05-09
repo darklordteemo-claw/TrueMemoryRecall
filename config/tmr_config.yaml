@@ -1,0 +1,337 @@
+# TrueMemoryRecall (TMR) v2 Plugin Configuration
+# Cognee-Style GraphRAG Pipeline
+# All adjustable parameters centralized for easy tuning
+
+# =============================================================================
+# STORAGE SETTINGS
+# =============================================================================
+storage:
+  raw_dir: "~/.openclaw/workspace/memory/raw"
+  graph_dir: "~/.openclaw/workspace/memory/graph"
+  feedback_dir: "~/.openclaw/workspace/memory/feedback"
+  
+# =============================================================================
+# QDRANT CONNECTION
+# =============================================================================
+qdrant:
+  host: "localhost"
+  port: "6333"
+  collections:
+    conversations: "tmr_conversations"
+    line_index: "tmr_line_index"
+    knowledge_graph: "tmr_knowledge_graph"
+    semantic_vectors: "tmr_semantic_vectors"
+    agents_files: "tmr_agents_files"
+    feedback: "tmr_feedback"
+
+# =============================================================================
+# PHASE 1: INTENT CLASSIFICATION
+# =============================================================================
+intent_classification:
+  enabled: true
+  
+  # Intent types with regex patterns (add/modify as needed)
+  # NOTE: Patterns use Python regex syntax. Double backslash for word boundaries.
+  intents:
+    greeting:
+      patterns:
+        - "\\b(hi|hello|hey|how are you|good morning|good evening|good afternoon|what\\s+up|sup|yo)\\b"
+        - "^\\s*(hi|hello|hey)\\s*$"
+      description: "Casual greeting or conversation starter"
+      
+    personal_identity:
+      patterns:
+        - "\\b(who are you|tell me about you|your name|about yourself|what are you|introduce yourself)\\b"
+        - "\\b(your personality|your vibe|what kind of ai|what kind of assistant)\\b"
+      description: "Questions about AI identity/personality"
+      
+    memory_recall:
+      patterns:
+        - "\\b(what did we|remember|we talked about|we discussed|earlier|before|last time|previously)\\b"
+        - "\\b(recall|remind me|what was|what were|as we discussed)\\b"
+      description: "References to previous conversations"
+      
+    technical_howto:
+      patterns:
+        - "\\b(how to|how do|how can|how should|what is|what are|explain|why does|why is)\\b"
+        - "\\b(fix|error|issue|problem|bug|broken|not working|failed|fails)\\b"
+        - "\\b(configure|setup|install|implement|debug|troubleshoot)\\b"
+      description: "Technical questions, debugging, how-to"
+      
+    preference_learn:
+      patterns:
+        - "\\b(i like|i love|i hate|i dislike|my favorite|my preference)\\b"
+        - "\\b(i prefer|i want|i need|i enjoy|i dont like)\\b"
+        - "\\b(i\\s+am\\s+interested\\s+in|i\\s+am\\s+into)\\b"
+      description: "User preferences, likes, dislikes"
+      
+    entity_lookup:
+      patterns:
+        - "^[A-Z][a-zA-Z\\s]{1,20}$"  # Single proper noun or short phrase
+        - "^(who|what|where|when|why|how)\\s+(is|are|was|were)\\s+([A-Z]\\w+)"
+      description: "Direct entity or concept lookup"
+  
+  # Embedding fallback for edge cases (future enhancement)
+  embedding_fallback:
+    enabled: false  # Set to true when Ollama embedder is ready
+    similarity_threshold: 0.75
+
+# =============================================================================
+# PHASE 2: QUERY PLANNING
+# =============================================================================
+query_planning:
+  enabled: true
+  
+  # Retrieval strategies configuration
+  strategies:
+    identity_first:
+      description: "Prioritize identity/personality files (SOUL.md, IDENTITY.md)"
+      source_priority: ["tmr_agents_files", "tmr_knowledge_graph"]
+      boost_identity: true
+      
+    temporal_priority:
+      description: "Prioritize recent conversations"
+      source_priority: ["tmr_knowledge_graph", "tmr_agents_files"]
+      boost_recent: true
+      time_decay: 0.95  # Older memories decay (0-1)
+      
+    technical_depth:
+      description: "Deep traversal for technical details"
+      source_priority: ["tmr_knowledge_graph"]
+      boost_technical: true
+      
+    preference_extraction:
+      description: "Extract and store user preferences"
+      source_priority: ["tmr_knowledge_graph", "tmr_agents_files"]
+      extract_preferences: true
+      
+    entity_expansion:
+      description: "Expand from entity to connected concepts"
+      source_priority: ["tmr_knowledge_graph", "tmr_agents_files"]
+      expand_entities: true
+      
+    hybrid:
+      description: "Balanced graph and semantic search"
+      source_priority: ["tmr_knowledge_graph", "tmr_agents_files"]
+  
+  # Ranking parameters
+  ranking:
+    diversity_penalty: 0.1  # Penalize similar results (0-1)
+    max_similarity: 0.8     # Max similarity for diversity
+    recency_boost_days: 7   # Days considered "recent"
+    recency_multiplier: 1.2 # Boost factor for recent items
+
+# =============================================================================
+# PHASE 3: MULTI-HOP TRAVERSAL
+# =============================================================================
+graph_traversal:
+  enabled: true
+  
+  # BFS traversal settings
+  bfs:
+    default_max_hops: 3      # Default hop depth
+    max_paths_per_entity: 10 # Max paths from each start entity
+    min_path_score: 0.1      # Minimum accumulated path score
+    
+  # Hop limits per intent (override defaults)
+  intent_hop_limits:
+    greeting: 1
+    personal_identity: 2
+    memory_recall: 3
+    technical_howto: 4
+    preference_learn: 2
+    entity_lookup: 3
+    default: 2
+  
+  # Scoring
+  scoring:
+    # Path score = product of relation strengths
+    # Relation strength comes from knowledge graph extraction confidence
+    min_relation_strength: 0.3  # Skip weak relations
+
+# =============================================================================
+# PHASE 4: FEEDBACK LOOP (Self-Improvement)
+# =============================================================================
+feedback_loop:
+  enabled: true
+  
+  # Performance tracking
+  performance:
+    # Bayesian prior for usefulness scoring
+    prior_mean: 0.5        # Assume 50% helpful initially
+    prior_strength: 5      # Virtual samples for prior
+    
+    # Relevance boost range (maps usefulness [0,1] to boost [min, max])
+    min_boost: 0.7         # Penalty for poor memories
+    max_boost: 1.3         # Reward for good memories
+    
+    # Minimum uses before trusting score
+    min_uses_for_trust: 3
+  
+  # Weight optimization
+  weight_optimization:
+    enabled: true
+    learning_rate: 0.05    # How fast weights adapt (0-1)
+    min_samples: 10        # Minimum outcomes before adapting
+    max_history: 100       # Keep last N outcomes per intent
+    
+    # Weight constraints (prevent overfitting)
+    min_weight: 0.1        # Minimum for any weight
+    max_weight: 0.9        # Maximum for any weight
+  
+  # Intent-specific default weights (will be optimized over time)
+  default_weights:
+    default:
+      graph: 0.4
+      semantic: 0.6
+    greeting:
+      graph: 0.1
+      semantic: 0.9
+    personal_identity:
+      graph: 0.2
+      semantic: 0.8
+    memory_recall:
+      graph: 0.6
+      semantic: 0.4
+    technical_howto:
+      graph: 0.7
+      semantic: 0.3
+    preference_learn:
+      graph: 0.5
+      semantic: 0.5
+    entity_lookup:
+      graph: 0.8
+      semantic: 0.2
+
+# =============================================================================
+# HYBRID SEARCH (Core Retrieval)
+# =============================================================================
+hybrid_search:
+  # Semantic search settings
+  semantic:
+    threshold: 0.50        # Minimum similarity score (0-1)
+    top_k: 10              # Number of semantic results
+    
+  # Graph search settings
+  graph:
+    # Adaptive strength thresholds by age
+    strength_thresholds:
+      recent_days: 7
+      recent_threshold: 0.40
+      medium_days: 30
+      medium_threshold: 0.35
+      old_threshold: 0.30
+    max_results: 10
+    
+  # Result merging
+  merging:
+    max_final_results: 5
+    deduplication:
+      # Fields to use for dedup key (subject, relation, object)
+      key_fields: ["subject", "relation", "object"]
+
+# =============================================================================
+# ENTITY EXTRACTION
+# =============================================================================
+entity_extraction:
+  # Minimum entity length
+  min_length: 2
+  
+  # Domain keywords to extract (context-aware)
+  domain_keywords:
+    food:
+      - eat
+      - food
+      - restaurant
+      - dinner
+      - lunch
+      - hungry
+      - meal
+      - cooking
+      - recipe
+      - cuisine
+      - dish
+    memory:
+      - remember
+      - memory
+      - discussed
+      - talked
+      - thinking
+      - mentioned
+      - recall
+      - conversation
+    code:
+      - code
+      - script
+      - function
+      - implementation
+      - programming
+      - developer
+      - software
+      - app
+    preference:
+      - like
+      - love
+      - enjoy
+      - prefer
+      - favorite
+      - hate
+      - dislike
+      - avoid
+      - dont like
+    person:
+      - who
+      - someone
+      - person
+      - people
+      - user
+      - liz
+
+# =============================================================================
+# FILTER SETTINGS (Legacy - for extraction)
+# =============================================================================
+filter:
+  min_length: 10
+  drop_patterns:
+    - "^hi$"
+    - "^ok$"
+    - "^yes$"
+    - "^no$"
+    - "^hm$"
+    - "^hmm$"
+    - "^hello$"
+    - "^hey$"
+    - "^yo$"
+    - "^wait$"
+    - "^umm?$"
+    - "^like$"
+    - "^so$"
+    - "^btw$"
+
+# =============================================================================
+# DAILY EXTRACTION SETTINGS
+# =============================================================================
+extraction:
+  enabled: true
+  model: "qwen/qwen3.5-flash-02-23"
+  time: "03:00"
+  timezone: "Asia/Kolkata"
+  api_key: "${OPENROUTER_API_KEY}"
+
+# =============================================================================
+# EMBEDDING SETTINGS (Local Ollama)
+# =============================================================================
+embeddings:
+  provider: "ollama"
+  model: "nomic-embed-text"
+  host: "http://192.168.1.100:11434"  # Updated to your Ollama host
+  vector_size: 768
+  batch_size: 32
+  fallback_enabled: true
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
