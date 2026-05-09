@@ -1,26 +1,37 @@
-# TMR v3: Two-Layer Memory Architecture
-## Next-Generation Design for Context-Aware Memory Injection
+# TMR V2 Design: Two-Layer Memory Architecture
+## A Ground-Truth-Preserving Consolidation Engine for Long-Term Agent Memory
 
-**Version:** 3.0 (Design)  
+**Version:** 2.0 (Design) — Replaces V1 single-layer architecture  
 **Status:** Design Phase  
 **Date:** 2026-05-09  
-**Architecture:** Two-Layer Memory with Consolidation Engine
+**Architecture:** Two-Layer Memory with Background Consolidation (no AI at query time)
 
 ---
 
 ## TABLE OF CONTENTS
 
 1. [Executive Summary](#1-executive-summary)
-2. [The Problem with V2](#2-the-problem-with-v2)
-3. [Two-Layer Architecture](#3-two-layer-architecture)
-4. [Layer 1: Raw Memory (Source of Truth)](#4-layer-1-raw-memory-source-of-truth)
-5. [Layer 2: Processed Memory (For Injection)](#5-layer-2-processed-memory-for-injection)
-6. [Consolidation Engine](#6-consolidation-engine)
-7. [Richer Memory Format](#7-richer-memory-format)
-8. [Improved Injection Strategy](#8-improved-injection-strategy)
-9. [Implementation Plan](#9-implementation-plan)
-10. [Comparison with Other Systems](#10-comparison-with-other-systems)
-11. [Glossary](#11-glossary)
+2. [The Problem with V1](#2-the-problem-with-v1)
+3. [Core Design Principles](#3-core-design-principles)
+4. [Two-Layer Architecture](#4-two-layer-architecture)
+5. [Layer 1: Raw Memory](#5-layer-1-raw-memory)
+6. [Layer 2: Processed Memory](#6-layer-2-processed-memory)
+7. [Consolidation Engine](#7-consolidation-engine)
+8. [Conflict Resolution Strategy](#8-conflict-resolution-strategy)
+9. [Profile Memory](#9-profile-memory)
+10. [Dynamic Scoring](#10-dynamic-scoring)
+11. [Enhanced Extraction](#11-enhanced-extraction)
+12. [Improved Injection](#12-improved-injection)
+13. [Feedback Loop](#13-feedback-loop)
+14. [Temporal Management](#14-temporal-management)
+15. [Scrutiny Log: Gaps Found & Closed](#15-scrutiny-log-gaps-found--closed)
+16. [Migration Path](#16-migration-path)
+17. [Cost Analysis](#17-cost-analysis)
+18. [Error Handling & Rollback](#18-error-handling--rollback)
+19. [Testing Strategy](#19-testing-strategy)
+20. [Implementation Plan](#20-implementation-plan)
+21. [System Comparison](#21-system-comparison)
+22. [Glossary](#22-glossary)
 
 ---
 
@@ -28,757 +39,731 @@
 
 ### The Core Insight
 
-TMR v2 has a fundamental design tension: **raw memories need to be preserved forever, but raw memories are also what gets injected.** This means we can never clean, consolidate, or improve the memory store without risking data loss.
+TMR V1 stores everything in one layer. Raw triples in, raw triples out. This means contradictions accumulate forever, stale facts never decay, scoring has no discrimination, and there's no concept of personality or profiles.
 
-**TMR v3 resolves this by splitting memory into two layers:**
+**V2 fixes this with two layers:** raw (immutable) and processed (consolidated). **All AI work is in background cron jobs. Zero AI at query time.**
 
-| Layer | Purpose | Mutable? | Used For |
-|-------|---------|----------|----------|
-| **Layer 1 — Raw** | Immutable source of truth | Never | Audit trail, exact recall |
-| **Layer 2 — Processed** | Consolidated, scored, injected | Yes | Context injection, retrieval |
+| Component | AI Needed? | When | Why |
+|-----------|:----------:|------|-----|
+| **Extraction** (existing) | ✅ LLM | Cron (2h) | Turn conversations → triples |
+| **Consolidation** (new) | ✅ LLM (partial) | Cron (2h) | **Only** for real conflicts; ADD/MERGE skip LLM |
+| **Profiling** (new) | ✅ LLM | Cron (daily) | Update user/agent/relationship profiles |
+| **Scoring** (new) | ❌ No AI | Query time | Pure math formula |
+| **Injection** (improved) | ❌ No AI | Query time | Template-based formatting |
+| **Feedback** (new) | ❌ No AI | Query + cron | Keyword-overlap heuristic |
+| **Search/Retrieval** | ❌ No AI | Query time | Vector search + math scoring |
 
-The raw layer stays untouched forever. The processed layer is rebuilt from raw data using a **Consolidation Engine** that handles conflict resolution, temporal tracking, merging, and scoring. If the processed layer has bugs, you regenerate it — zero data loss.
-
-### Key Improvements Over V2
-
-| Area | V2 | V3 |
-|------|-----|-----|
-| **Memory storage** | Single layer — raw triples | Two layers — raw + processed |
-| **Memory management** | ADD only | ADD/UPDATE/DELETE/MERGE on processed layer |
-| **Entity types** | Flat strings ("User", "topic") | Typed entities (Person, Project, Preference, Location, etc.) |
-| **Temporal tracking** | None | Creation time, last-referenced time, state transitions |
-| **Conflict resolution** | None | New info supersedes old; old marked as `superseded` |
-| **Confidence scoring** | Flat ~0.5 | Dynamic: recency + specificity + entity-type + usage frequency |
-| **Injection format** | Generic triples | Rich summaries with file paths, entity context |
-| **Feedback loop** | Wired but not used | Auto-judge: compare injected vs actual response utility |
+**Extra LLM cost:** ~5-15 calls per 2h cycle = 60-180 extra calls/day. Cognee costs infinitely more because they call LLM on every search.
 
 ---
 
-## 2. THE PROBLEM WITH V2
+## 2. THE PROBLEM WITH V1
 
-### 2.1 Single Layer = No Cleanup
-
-V2 stores everything in one Qdrant collection (`tmr_knowledge_graph`). Every extracted relation lives forever. This means:
-
-- **Contradictions accumulate**: "User prefers VS Code" and "User uses PyCharm" both exist with equal weight
-- **Stale info never decays**: Preferences from 3 months ago have the same score as yesterday's
-- **No way to improve**: If the extraction quality is poor, you can't fix it without losing data
-
-### 2.2 Generic Extraction
-
-The Qwen extractor produces flat triples:
-
-```json
-{
-  "subject": "User",
-  "relation": "REMEMBERED",
-  "object": "discussed TMR memory injection logic"
-}
-```
-
-This loses:
-- **Entity types**: Is "SnookerFlow" a project, a website, a game?
-- **Temporal context**: Was this a one-time event or an ongoing preference?
-- **Importance**: Is this a critical bug or a casual observation?
-- **Relationships**: How does this connect to other memories?
-
-### 2.3 Flat Confidence Scoring
-
-The relevance score in V2 is computed from:
-- Base hybrid score (60%)
-- Thread continuity (up to +0.45)
-- Recency (up to +0.20)
-- Intent alignment (+0.10)
-
-In practice, every memory clusters around 0.45–0.55 — barely above the Tier 1/Tier 2 boundary. The scoring lacks **discrimination** because the input features (the triples) are too uniform.
+- **No cleanup possible** — contradictions stay forever
+- **Stale info gets equal weight** — no decay
+- **Flat scoring** — everything clusters at 0.45-0.55
+- **No profiles** — just generic "User prefers X"
 
 ---
 
-## 3. TWO-LAYER ARCHITECTURE
+## 3. CORE DESIGN PRINCIPLES
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         LAYER 1: RAW MEMORY                               │
-│                         (Immutable Source of Truth)                        │
-│                                                                             │
-│   Raw Files ──▶ Qwen Extractor ──▶ Raw Relations ──▶ Qdrant (size=1)       │
-│                      │                                                        │
-│                      │ (also saved to disk: memory/graph/YYYY-MM-DD.json)     │
-│                      ▼                                                        │
-│              Raw Embeddings ──▶ Qdrant (size=768)                            │
-│                                                                             │
-│   Collections:                                                              │
-│   - tmr_knowledge_graph_raw (relations, size=1)                            │
-│   - tmr_semantic_vectors_raw (embeddings, size=768)                        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      │ Consolidation Engine (runs after extraction)
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      LAYER 2: PROCESSED MEMORY                             │
-│                      (Consolidated, For Injection)                         │
-│                                                                             │
-│   Consolidation Engine:                                                     │
-│   1. Read raw relations from Layer 1                                       │
-│   2. Resolve conflicts (ADD/UPDATE/DELETE/MERGE)                           │
-│   3. Apply temporal tracking                                               │
-│   4. Compute dynamic confidence scores                                     │
-│   5. Write to Layer 2                                                       │
-│                                                                             │
-│   Collections:                                                              │
-│   - tmr_consolidated_graph (processed relations, size=1)                   │
-│   - tmr_consolidated_vectors (processed embeddings, size=768)              │
-│                                                                             │
-│   Can be rebuilt from Layer 1 at any time.                                  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      │ On query
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      RETRIEVAL & INJECTION                                 │
-│                                                                             │
-│   Query ──▶ Intent Classification ──▶ Search Processed Layer ──▶            │
-│   ──▶ Dynamic Scoring ──▶ Tiered Injection ──▶ Context                     │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 3.1 Data Flow
-
-```
-1. Raw conversation → Qwen Extractor → Layer 1 (raw relations + embeddings)
-2. Consolidation Engine triggers → reads Layer 1 → resolves → writes Layer 2
-3. User query → search Layer 2 → score → inject into context
-4. (Optional) If Layer 2 seems wrong → fall back to Layer 1 for exact truth
-```
-
-### 3.2 Key Design Principle
-
-**Layer 2 is always rebuildable from Layer 1.** This means:
-
-- We can experiment with consolidation strategies without risk
-- If the consolidation engine has a bug, we fix it and regenerate
-- The raw truth is always available for audit
+| # | Principle | Rationale |
+|---|-----------|-----------|
+| **P1** | **No AI at query time** | You're paying for extraction cron, not per-query. Search/score/format are math-only. |
+| **P2** | **Raw layer is immutable** | Deleted data can recover. Consolidation can rebuild from scratch. |
+| **P3** | **LLM is last resort** | Heuristics handle 90% of cases. Only call LLM for genuine ambiguity. |
+| **P4** | **Layer 2 is regenerable** | Bug in consolidation? Fix + regenerate. Zero data loss. |
+| **P5** | **Profiles over flat facts** | User + Agent + Relationship profiles capture more than triples ever could. |
+| **P6** | **Self-improving without AI** | Feedback uses keyword-overlap heuristic. No LLM call per feedback cycle. |
 
 ---
 
-## 4. LAYER 1: RAW MEMORY (SOURCE OF TRUTH)
+## 4. TWO-LAYER ARCHITECTURE
 
-### 4.1 What Stays the Same
-
-- **Extraction pipeline**: Qwen extractor → relations + embeddings (unchanged from V2)
-- **Raw file storage**: `memory/raw/YYYY-MM-DD.md` (unchanged)
-- **Graph file storage**: `memory/graph/YYYY-MM-DD.json` (unchanged)
-- **Incremental extraction**: 2-hour cron (unchanged)
-
-### 4.2 What Changes
-
-**Renamed Qdrant collections** to make the two-layer structure explicit:
-
-| Old Name | New Name | Purpose |
-|----------|----------|---------|
-| `tmr_knowledge_graph` | `tmr_knowledge_graph_raw` | Raw relations |
-| `tmr_semantic_vectors` | `tmr_semantic_vectors_raw` | Raw embeddings |
-| `tmr_agents_files` | `tmr_agents_files_raw` | Raw agent file metadata |
-
-**Richer raw format** (optional, can be phased):
-
-```json
-{
-  "subject": "User",
-  "relation": "PREFERS",
-  "object": "dark green ball logo for SnookerFlow",
-  "entity_type": "preference",
-  "temporal_context": "stated_on: 2026-05-09",
-  "importance": 7,
-  "source": {
-    "file": "memory/raw/2026-05-09.md",
-    "line_start": 42,
-    "line_end": 45,
-    "text_snippet": "User: the dark green ball logo looks better"
-  },
-  "extraction_timestamp": "2026-05-09T19:00:00Z"
-}
 ```
-
-The key additions:
-- `entity_type`: Categorizes the memory (preference, fact, event, instruction, etc.)
-- `temporal_context`: When the information was relevant
-- `importance`: LLM-assigned importance score (1-10) at extraction time
-- `extraction_timestamp`: When this was extracted (for recency scoring)
-
-### 4.3 Immutability Guarantee
-
-**Layer 1 data is never modified after insertion.** The only operations are:
-- **INSERT**: New raw relations from extraction
-- **READ**: For consolidation engine and fallback queries
-
-No UPDATES, no DELETES, no MERGES. Ever.
+┌──────────────────────────────────────────────────────────────────┐
+│                        QUERY TIME (NO AI)                        │
+│                                                                  │
+│  User query ──▶ Search Layer 2 ──▶ Score (math) ──▶ Format ──▶ │
+│                                                                    │
+│  If Layer 2 empty:                                               │
+│    └─▶ Search Layer 1 raw (fallback) ──▶ Same format           │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ Built by
+┌──────────────────────────────────────────────────────────────────┐
+│                     CRON JOB (EVERY 2H)                          │
+│                                                                  │
+│  Raw convo ──▶ Qwen extract ──▶ Layer 1 (raw, immutable)         │
+│                                    │                             │
+│                                    ▼                             │
+│                           ┌──────────────────┐                   │
+│                           │  CONSOLIDATION   │                   │
+│                           │                  │                   │
+│                           │  Group by entity │ ← heuristic only │
+│                           │  Check conflicts │ ← heuristic 90%  │
+│                           │  Resolve (LLM)   │ ← only if needed │
+│                           │  Update profiles │ ← batched daily  │
+│                           └────────┬─────────┘                   │
+│                                    │                             │
+│                                    ▼                             │
+│                              Layer 2 (processed)                  │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 5. LAYER 2: PROCESSED MEMORY (FOR INJECTION)
+## 5. LAYER 1: RAW MEMORY
 
-### 5.1 Purpose
+### 5.1 Collections
 
-Layer 2 is the **curated, consolidated view** of all memories. It's what gets searched and injected into context. It can be regenerated from Layer 1 at any time.
+| V1 Name | V2 Name | What It Is |
+|---------|---------|------------|
+| `tmr_knowledge_graph` | `tmr_knowledge_graph_raw` | Raw triples — immutable |
+| `tmr_semantic_vectors` | `tmr_semantic_vectors_raw` | Raw embeddings — immutable |
+| (new) | `tmr_consolidated_graph` | Consolidated memories — mutated by cron |
+| (new) | `tmr_consolidated_vectors` | Consolidated embeddings |
+| (new) | `tmr_profiles` | User/agent/relationship profiles |
+| (new) | `tmr_feedback_log` | Feedback history for self-improvement |
 
-### 5.2 Collections
+### 5.2 Immutability Guarantee
 
-| Collection | Size | Purpose |
-|------------|------|---------|
-| `tmr_consolidated_graph` | 1 | Processed relations with resolved conflicts |
-| `tmr_consolidated_vectors` | 768 | Processed embeddings for semantic search |
+Layer 1 data is **never modified after insertion**. Operations: INSERT, READ only. No UPDATE, no DELETE. Ever.
 
-### 5.3 Memory Format
+---
 
-Layer 2 memories are richer than Layer 1:
+## 6. LAYER 2: PROCESSED MEMORY
+
+Store format:
 
 ```json
 {
   "id": "uuid",
-  "summary": "User prefers dark green ball logo for SnookerFlow website",
-  "entity_type": "preference",
+  "summary": "User discussed TMR memory injection, noting graph search fails because extractor hardcodes 'User' as subject",
+  "entity_type": "discussion",
+  "topics": ["TMR", "memory injection"],
   "entities": {
     "primary": {"name": "User", "type": "person"},
-    "secondary": [
-      {"name": "SnookerFlow", "type": "project"},
-      {"name": "dark green ball logo", "type": "design_element"}
-    ]
+    "mentioned": [{"name": "TMR", "type": "project"}]
   },
   "temporal": {
     "created": "2026-05-09T19:00:00Z",
     "last_referenced": "2026-05-09T20:00:00Z",
-    "state": "current"  // current | superseded | expired
+    "state": "current"
   },
   "confidence": {
-    "overall": 0.85,
-    "recency": 0.95,
-    "specificity": 0.80,
-    "source_quality": 0.75,
-    "usage_frequency": 0.70
+    "overall": 0.72,
+    "recency": 0.90,
+    "specificity": 0.65,
+    "entity_match": 0.55,
+    "usage_frequency": 0.40
   },
-  "source": {
-    "raw_file": "memory/raw/2026-05-09.md",
-    "line_start": 42,
-    "line_end": 45
-  },
+  "source": {"file": "memory/raw/2026-05-09.md", "line": 42},
   "consolidation": {
-    "supersedes": ["uuid-of-older-version"],
+    "supersedes": [],
     "superseded_by": null,
-    "merge_group": "snookerflow-design",
-    "consolidation_timestamp": "2026-05-09T20:05:00Z"
-  }
+    "source_count": 1
+  },
+  "injection_count": 3,
+  "consecutive_misses": 0
 }
 ```
 
-### 5.4 Key Features
-
-**Entity typing**: Every memory has typed entities (person, project, preference, location, etc.). This enables:
-- Entity-specific search ("find all project-related memories")
-- Relationship mapping ("what projects does User have preferences about?")
-- Better relevance scoring (matching entity types between query and memory)
-
-**Temporal tracking**: Each memory tracks:
-- `created`: When the memory was first extracted
-- `last_referenced`: When it was last injected into context (updated on injection)
-- `state`: `current` | `superseded` | `expired`
-
-**Confidence breakdown**: Instead of a single flat score, confidence has sub-scores:
-- `recency`: Higher for recent memories
-- `specificity`: Higher for memories with specific details (prefers X over Y, not just "likes X")
-- `source_quality`: Higher when extracted from direct statements vs inferred
-- `usage_frequency`: Higher for memories that have been useful in past injections
+Every field is either pre-computed in cron or updated with simple math at query time.
 
 ---
 
-## 6. CONSOLIDATION ENGINE
+## 7. CONSOLIDATION ENGINE
 
-### 6.1 Overview
-
-The Consolidation Engine is the core new component. It runs after each extraction cycle and processes raw Layer 1 memories into consolidated Layer 2 memories.
+### 7.1 Pipeline
 
 ```
-Raw Memories (Layer 1)
-    │
-    ▼
-┌─────────────────────┐
-│ 1. Entity Matching  │ ← Group memories by entity
-└─────────┬───────────┘
-          ▼
-┌─────────────────────┐
-│ 2. Conflict Detect  │ ← Find contradictions
-└─────────┬───────────┘
-          ▼
-┌─────────────────────┐
-│ 3. Conflict Resolve │ ← ADD / UPDATE / DELETE / MERGE / SUPERSEDE
-└─────────┬───────────┘
-          ▼
-┌─────────────────────┐
-│ 4. Temporal Update  │ ← Track state transitions
-└─────────┬───────────┘
-          ▼
-┌─────────────────────┐
-│ 5. Score Compute    │ ← Dynamic confidence scoring
-└─────────┬───────────┘
-          ▼
-    Layer 2 (Processed)
+1. Load new raw memories from Layer 1 (since last checkpoint)
+2. Group by primary entity (just extract subject string — NO LLM)
+3. For each entity group:
+   ├─ Entity new in Layer 2? ──► ADD (NO LLM)
+   ├─ Content similar (sim > 0.9)? ──► MERGE (NO LLM)
+   ├─ Content contradictory (sim < 0.3, same relation)?
+   │   └─ Timestamp is unambiguous ──► SUPERSEDE older (NO LLM)
+   │   └─ Ambiguous ──► LLM decides (MINORITY CASE)
+   └─ Different relation, same entity ──► ADD as new entry (NO LLM)
+4. Check for expired memories by entity type rules (NO LLM)
+5. Write back to Layer 2
 ```
 
-### 6.2 Phase 1: Entity Matching
+### 7.2 LLM Call Analysis
 
-Group raw memories by their primary entities to identify related memories.
+| Scenario | % of Memories | LLM Needed? |
+|----------|:-------------:|:-----------:|
+| ADD (new entity) | 70-80% | ❌ No |
+| MERGE (similar) | 10-15% | ❌ No |
+| ADD (same entity, new topic) | 5-10% | ❌ No |
+| SUPERSEDE (unambiguous) | 2-5% | ❌ No |
+| SUPERSEDE (ambiguous) | 1-3% | ✅ Yes |
+| Summary generation | 10-20% | ⚡ Optional (Phase 2) |
+
+**Result:** ~1-5% of memories need LLM at consolidation. For 100 memories/day, that's 1-5 LLM calls per cycle, 12-60 per day.
+
+### 7.3 Summary Generation Strategy
+
+| Option | When | Description |
+|--------|------|-------------|
+| **A (Phase 1)** | Default | Skip summaries. Use raw `object` field. Works fine. |
+| **B (Phase 2)** | Stable pipeline | Generate summaries only for conflicts/merges — LLM already doing context work, one extra sentence. |
+| **C (Phase 3)** | Full feature | Batch summaries in separate daily cron. Lower cost but stale data. |
+
+**Start with A.** Improvement comes from scoring + consolidation, not summaries.
+
+---
+
+## 8. CONFLICT RESOLUTION STRATEGY
+
+### 8.1 Heuristic Flow
 
 ```
-Input: Raw memories
-Process: For each memory, extract primary entity → group with existing memories about same entity
-Output: Entity groups
+New raw memory "User prefers VS Code" — from extraction on 2026-05-10
 
-Example:
-  "User prefers VS Code"  → group: {entity: "User", sub_entity: "VS Code"}
-  "User uses PyCharm"     → group: {entity: "User", sub_entity: "PyCharm"}
-  Both in "User → editor_preference" group
+Check Layer 2 for existing "User" entity memories:
+  ├─ "User prefers PyCharm" (2026-05-01)
+  │   └─ Same relation, contradicts ──► SUPERSEDE (newer timestamp wins, NO LLM)
+  │
+  ├─ "User discussed VS Code" (2026-05-08)
+  │   └─ Different relation, same entity ──► ADD as new entry (NO LLM)
+  │
+  ├─ "User uses VS Code" (2026-05-09)
+  │   └─ Similar intent ──► MERGE (NO LLM, increment source_count)
+  │
+  └─ "User prefers VS Code for Python, PyCharm for web" (2026-05-10)
+      └─ Context-restricted preference ──► LLM decides if this is NEW or UPDATE
 ```
 
-### 6.3 Phase 2: Conflict Detection
+### 8.2 When to Call LLM
 
-Within each entity group, detect conflicts between memories.
+Only when:
+1. **Temporal ambiguity** — can't tell which supersedes which
+2. **Refinement** — "likes pasta" → "prefers carbonara", is this update or new fact?
+3. **Context-dependent contradiction** — "User prefers X for web but Y for mobile"
 
-**Conflict types:**
+### 8.3 Lightweight LLM Prompt
 
-| Type | Example | Resolution |
-|------|---------|------------|
-| **Direct contradiction** | "User prefers VS Code" vs "User prefers PyCharm" | Newer supersedes older |
-| **Temporal change** | "User lives in London" vs "User lives in Tokyo" | State transition: old → superseded |
-| **Refinement** | "User likes pasta" vs "User prefers carbonara" | Merge: carbonara is specific type of pasta preference |
-| **Duplicate** | Same fact extracted twice | Merge: keep one, reference both sources |
+```
+Existing: "User prefers VS Code"
+New:      "User prefers VS Code for Python, PyCharm for web"
 
-**Detection method:**
+Decide: ADD | UPDATE | SUPERSEDE | MERGE
+Entity type: preference | fact | event | instruction | discussion
 
-For each new raw memory, compare against existing Layer 2 memories with the same entity/sub-entity:
-1. Compute semantic similarity between the `object` fields
-2. If similarity > 0.9 → likely duplicate → MERGE
-3. If similarity < 0.3 but same entity/sub-entity → possible contradiction → flag for resolution
-4. If one is a specific instance of the other (e.g., "pasta" vs "carbonara") → MERGE as refinement
+Output:
+decision: <X>
+reason: <one sentence>
+entity_type: <type>
+```
 
-### 6.4 Phase 3: Conflict Resolution
+---
 
-For each detected conflict, the LLM (Qwen) decides the appropriate operation:
+## 9. PROFILE MEMORY
 
-| Operation | When | Effect |
-|-----------|------|--------|
-| **ADD** | New memory about a new entity | Create new Layer 2 entry |
-| **UPDATE** | New info complements existing | Add details to existing entry |
-| **MERGE** | Same info from different sources | Combine sources, update confidence |
-| **SUPERSEDE** | New info contradicts old | Mark old as `superseded`, create new entry |
-| **DELETE** | Info is clearly wrong/no longer relevant | Remove from Layer 2 (raw still exists) |
-| **NOOP** | Info is trivial or redundant | Skip |
+### 9.1 Why Three Profiles?
 
-**Implementation:**
+| Profile | Captures |
+|---------|----------|
+| User | What you like, your style, recurring topics |
+| Agent | What I'm good at, my gaps, learned adaptations |
+| Relationship | The dynamic between us — how to communicate **you** in **this mode** |
+
+The relationship profile is the key differentiator. EverMemOS and MemMachine don't have this.
+
+### 9.2 Profile Schemas (Abbreviated)
+
+**User profile** includes: communication style, technical level per domain, decision pattern, recurring topics with frequency, key facts, preferences with confidence.
+
+**Agent profile** includes: strengths, weaknesses, knowledge gaps, learned adaptations per context, confidence calibration.
+
+**Relationship profile** includes: interaction modes (deep work/debugging/casual), triggers for each mode, communication shortcuts learned from history, trust level.
+
+### 9.3 Profile Updates
+
+- **User profile**: LLM extracts patterns from ~1 week of conversation (daily cron — not every 2h)
+- **Agent profile**: Updated from feedback loop results (what worked, what tanked)
+- **Relationship profile**: Derived from user + agent profiles + interaction history
+
+### 9.4 Profile Injection
+
+At query time, relevant profile traits are injected alongside memories. Templates, no AI. Example:
+
+```
+[PROFILE: Uddipta]
+  Style: direct, weighs options before deciding
+  Current focus: SnookerFlow, TMR
+  Technical: expert (SE), intermediate (design/ops)
+
+[PROFILE: Relationship]
+  In technical design: provide tradeoffs + code, don't force single answer
+```
+
+### 9.5 Anti-Bloat
+
+Cap profiles at ~50 entries. Replace oldest/lowest-confidence when full. Version for rollback.
+
+---
+
+## 10. DYNAMIC SCORING
+
+### 10.1 Formula
 
 ```python
-def resolve_conflict(raw_memory, existing_l2_memories):
-    """
-    LLM decides what to do with a raw memory vs existing processed memories.
-    """
-    prompt = f"""
-    Existing memory: {existing_l2_memories}
-    New information: {raw_memory}
-    
-    Choose ONE operation:
-    - ADD: New information about a new topic
-    - UPDATE: New information adds to existing (no contradiction)
-    - MERGE: Same information from different source
-    - SUPERSEDE: New information contradicts existing (mark old as outdated)
-    - DELETE: Information is wrong or no longer relevant
-    - NOOP: Information is trivial or already fully covered
-    
-    Output: operation, reason
-    """
-    # LLM call
-    return operation, reason
+def score(memory, query, now):
+    # RECENCY (weight: 0.25)
+    days = (now - memory.created).days
+    recency = 1.0 if days < 1 else 0.9 if days < 7 else 0.7 if days < 30 else 0.5 if days < 90 else 0.3
+
+    # SPECIFICITY (weight: 0.25) — 4 indicators, max 1.0
+    indicators = 0
+    if len(memory.object or memory.summary) > 50: indicators += 1  # Has detail
+    if any(r in memory.relation for r in ["prefers", "uses", "decided", "configured"]):
+        indicators += 1  # Has preference/action
+    if any(c.isdigit() for c in memory.object): indicators += 1  # Has concrete values
+    if len(memory.entities.mentioned) > 0: indicators += 1  # Links to other entities
+    specificity = min(1.0, indicators / 4)
+
+    # ENTITY MATCH (weight: 0.25)
+    query_nouns = simple_noun_extract(query)  # spaCy or regex, no LLM
+    memory_entities = [memory.subject] + [e.name for e in memory.entities.mentioned]
+    overlap = len(set(query_nouns) & set(memory_entities))
+    entity_match = min(1.0, overlap / max(1, len(query_nouns)))
+
+    # USAGE FREQUENCY (weight: 0.25)
+    ic = memory.injection_count
+    usage = 0.1 if ic == 0 else 0.3 if ic <= 2 else 0.5 if ic <= 5 else 0.7 if ic <= 10 else 0.9
+
+    overall = recency*0.25 + specificity*0.25 + entity_match*0.25 + usage*0.25
+
+    return {"overall": round(overall, 2), "recency": recency,
+            "specificity": specificity, "entity_match": entity_match,
+            "usage": usage}
 ```
 
-This is intentionally **lightweight** — only runs on detected conflicts, not on every memory. Most memories will be simple ADDs.
+### 10.2 Tier Thresholds
 
-### 6.5 Phase 4: Temporal Update
+| Tier | Score | Action |
+|------|-------|--------|
+| 1 | ≥ 0.60 | Full injection with summary |
+| 2 | 0.35 – 0.59 | Reference only |
+| 3 | < 0.35 | Skip |
 
-Track when memories change state:
+Thresholds lower than V1 (0.75/0.45) because scoring now discriminates properly.
 
+---
+
+## 11. ENHANCED EXTRACTION
+
+Phase 1: **Don't change the extractor.** Current raw triples are fine.
+
+Phase 2: Optional. Add to extractor prompt:
 ```
-Timeline:
-  Day 1: "User lives in London" → Layer 2: {state: "current"}
-  Day 30: "User moved to Tokyo" → Layer 2: {
-    "User lives in Tokyo": {state: "current"},
-    "User lives in London": {state: "superseded", superseded_by: "User lives in Tokyo"}
-  }
-```
-
-**Temporal state machine:**
-
-```
-                    ┌──────────┐
-        New info    │          │   Time passes
-     ──────────────▶│ Current  │──────────────▶
-                    │          │                │
-                    └──────────┘                │
-                         │                      │
-                         │ Contradiction         │ No reference for N days
-                         ▼                      ▼
-                    ┌──────────┐          ┌──────────┐
-                    │Superseded│          │ Expired  │
-                    └──────────┘          └──────────┘
+For each memory, also classify:
+- Type: preference | fact | event | instruction | discussion
+- Importance: 1-10
+- Entities mentioned: comma-separated list
 ```
 
-**Expiry policy:**
-- Memories with `entity_type: preference` → expire after 90 days without reference
-- Memories with `entity_type: fact` → never expire
-- Memories with `entity_type: event` → expire after 30 days
-- Memories with `entity_type: instruction` → expire after 7 days (likely one-time)
+**Risk:** Prompt change could degrade quality.  
+**Mitigation:** A/B test for 1 cycle before switching.
 
-### 6.6 Phase 5: Score Computation
+---
 
-Dynamic confidence scoring replaces V2's flat scoring:
+## 12. IMPROVED INJECTION
+
+### 12.1 No AI — Pure Templates
 
 ```python
-def compute_confidence(memory):
-    scores = {}
-    
-    # Recency: higher for recent memories
-    days_old = (now - memory.created).days
-    scores['recency'] = max(0, 1 - (days_old / 90))  # Linear decay over 90 days
-    
-    # Specificity: higher for specific vs generic memories
-    # "prefers VS Code over PyCharm" > "likes coding"
-    scores['specificity'] = min(1, len(memory.object.split()) / 10)
-    
-    # Source quality: direct statement > inferred > extracted
-    quality_map = {"direct": 0.9, "inferred": 0.7, "extracted": 0.5}
-    scores['source_quality'] = quality_map.get(memory.source_type, 0.5)
-    
-    # Usage frequency: higher for memories that have been useful
-    if memory.injection_count > 5:
-        scores['usage_frequency'] = 0.9
-    elif memory.injection_count > 2:
-        scores['usage_frequency'] = 0.7
-    else:
-        scores['usage_frequency'] = 0.4
-    
-    # Overall: weighted combination
-    weights = {
-        'recency': 0.30,
-        'specificity': 0.25,
-        'source_quality': 0.25,
-        'usage_frequency': 0.20
-    }
-    
-    overall = sum(scores[k] * weights[k] for k in weights)
-    return {
-        'overall': overall,
-        **scores
-    }
+def format_tier1(m):
+    badge = f"[{m.entity_type.title()}]"
+    if m.topics: badge = badge[:-1] + f": {m.topics[0]}]"
+    summary = m.summary or m.object
+    source = f"📎 {m.source.file}:{m.source.line}"
+    meta = f"🎯 relevance: {m.confidence['overall']} | seen: {time_ago(m.last_referenced)}"
+    return f"{badge}\n{summary}\n{source}\n{meta}"
+
+def format_tier2(m):
+    hint = (m.summary[:80] if m.summary else m.object[:80]) + "..."
+    return f"📎 {m.source.file}:{m.source.line} — {hint}"
+```
+
+### 12.2 Example Output
+
+```
+📌 [Discussion: TMR]
+  User pointed out that extractor hardcodes all subjects as "User",
+  making graph search fail for entity-specific queries.
+  📎 memory/raw/2026-05-08.md:19-20
+  🎯 relevance: 0.72 | seen: 2h ago
 ```
 
 ---
 
-## 7. RICHER MEMORY FORMAT
+## 13. FEEDBACK LOOP
 
-### 7.1 Entity Types
+### 13.1 Query-Time Tracking (No AI)
 
-All entities in Layer 2 are typed. The initial taxonomy:
+After injection, record:
+- `injection_count` += 1
+- `last_injected_at` = now
+- Check if response keywords overlap memory entities (simple keyword match)
 
-| Type | Examples | Scoring Weight |
-|------|----------|----------------|
-| `person` | User, Liz | High — always relevant |
-| `project` | SnookerFlow, TMR | High — project context |
-| `preference` | food, editor, design | Medium — user likes/dislikes |
-| `location` | home, work, city | Medium — where things happen |
-| `event` | meeting, bug, release | Medium — one-time occurrences |
-| `instruction` | fix this, deploy that | Low — usually one-time |
-| `fact` | API key, server address | High — always relevant |
-| `concept` | GraphRAG, embeddings | Medium — discussion topics |
+If **zero overlap** after 3 consecutive injections → mark for demotion.
 
-### 7.2 Relation Types
+### 13.2 Consolidation-Time Application
 
-Richer relation types beyond V2's flat `REMEMBERED`:
-
-| Relation | Example |
-|----------|---------|
-| `PREFERS` | User → PREFERS → dark green ball logo |
-| `WORKS_ON` | User → WORKS_ON → SnookerFlow project |
-| `LOCATED_AT` | Server → LOCATED_AT → 192.168.1.106 |
-| `INSTRUCTED` | User → INSTRUCTED → fix the dimension mismatch |
-| `DISCUSSED` | User ↔ Liz → DISCUSSED → TMR architecture |
-| `DECIDED` | User → DECIDED → two-layer memory architecture |
-| `USES` | User → USES → VS Code |
-| `IS_A` | SnookerFlow → IS_A → web application |
-| `RELATED_TO` | Logo → RELATED_TO → SnookerFlow branding |
-
-### 7.3 Summary Generation
-
-Instead of injecting raw triples, Layer 2 stores a **generated summary** for each memory:
-
-```
-Raw triple:    User → PREFERS → dark green ball logo for SnookerFlow
-Summary:       "User prefers the dark green ball logo (with #00e5a0 green stroke, 
-               white center circle, and dark 'SF' text) for the SnookerFlow website. 
-               This was implemented across all pages including index.html, admin.html, 
-               LoginPage.tsx, and the favicon."
+During daily consolidation:
+```python
+for m in Layer2:
+    if m.consecutive_misses > 3:
+        m.usage_frequency = max(0.1, m.usage_frequency - 0.2)
+        m.consecutive_misses = 0
+    elif m.injection_count > 5 and m.consecutive_misses < 2:
+        m.usage_frequency = min(1.0, m.usage_frequency + 0.1)
 ```
 
-Summaries are generated by the LLM during consolidation and stored in Layer 2. They provide **immediately useful context** without needing to read the source file.
+### 13.3 Trade-off
+
+**Not perfect** — keyword overlap ≠ "was useful." But it's **free** and better than nothing. Phase 2 can add lightweight NLP (spaCy) without LLM cost.
 
 ---
 
-## 8. IMPROVED INJECTION STRATEGY
+## 14. TEMPORAL MANAGEMENT
 
-### 8.1 Current V2 Injection
-
-```
-[RELATED MEMORY - TMR]
-
-From previous conversations:
-
-1. The User questioned the TMR memory injection logic, noting that graph search fails
-   because the extractor hardcodes the subject as "User".
-   (conf: 50%, rel: 0.95, method: HYBRID)
-   [Source: memory/raw/2026-05-08.md:19-20]
-```
-
-Problems:
-- Generic summaries ("The User questioned...")
-- Flat confidence (50%)
-- No entity context
-- Method info (HYBRID) is noise, not signal
-
-### 8.2 V3 Injection Format
+### 14.1 State Machine
 
 ```
-📌 [Memory: Project - TMR]
-   User identified that the extractor hardcodes all subjects as "User", making graph 
-   search fail because it can't distinguish between different entities. This was 
-   discussed as a critical bug in the extraction pipeline.
-   📎 memory/raw/2026-05-08.md:19-20
-   🎯 relevance: 0.85 | last referenced: 2h ago | state: current
-
-📌 [Memory: Decision - Architecture]
-   User decided on a two-layer memory architecture for TMR v3: Raw layer (immutable 
-   source of truth) + Processed layer (consolidated, for injection). The consolidation 
-   engine handles conflict resolution, temporal tracking, and dynamic scoring.
-   📎 memory/raw/2026-05-09.md:42-48
-   🎯 relevance: 0.92 | last referenced: just now | state: current
+[NEW] ──► [CURRENT] ──► [SUPERSEDED]  (newer info came)
+                      │
+                      └──► [EXPIRED]    (no reference for N days)
 ```
 
-Key improvements:
-- **Entity badges**: `[Memory: Project - TMR]`, `[Memory: Decision - Architecture]`
-- **Rich summaries**: Full sentence context, not generic triples
-- **Source links**: Clean file paths
-- **Relevance score**: Dynamic, with breakdown
-- **Temporal context**: "last referenced: 2h ago"
-- **State**: "current" vs "superseded"
+### 14.2 Expiry Rules
 
-### 8.3 Tier Thresholds (Refined)
+| Entity Type | Expire After | Reason |
+|------------:|-------------|--------|
+| fact | Never | Facts don't change (User is in India) |
+| preference | 90 days | Preferences evolve |
+| event | 30 days | Events are one-time |
+| instruction | 7 days | Usually one-shot |
+| discussion | 60 days | Context fades |
 
-| Tier | Score Range | Format |
-|------|-------------|--------|
-| **Tier 1** | ≥ 0.75 | Full summary + entity badge + source link + metadata |
-| **Tier 2** | 0.45 – 0.74 | Short hint + source link only |
-| **Tier 3** | < 0.45 | Silently skipped |
-
-### 8.4 Auto-Feedback Loop
-
-After every response, the system compares:
-1. Query
-2. Injected memories
-3. Actual assistant response
-
-If a memory was injected but the response didn't reference it → downweight that memory's `usage_frequency`
-If a memory wasn't injected but the response referenced it → it should have been → upweight similar memories
-
-This creates a **self-improving injection system** that learns which memories are actually useful.
+Expired memories aren't deleted — just excluded from search. Layer 1 fallback still finds them.
 
 ---
 
-## 9. IMPLEMENTATION PLAN
+## 15. SCRUTINY LOG: GAPS FOUND & CLOSED
+
+This section exists because Uddipta asked me to **scrutinize my own plan** before committing to it. Here's what I found wrong with my own thinking:
+
+### Gap 1: Migration Path
+**First draft:** Assumed clean start. ❌  
+**Reality:** V1 has thousands of existing triples. Can't drop them.  
+**Fix:** Migrate existing data on first V2 run. See [Migration Path](#16-migration-path).
+
+### Gap 2: LLM Cost Was Underestimated
+**First draft:** Said "~20 LLM calls/day" without analysis. ❌  
+**Reality:** Prompted extraction stays the same. Consolidation adds ~5-15 calls/cycle = ~60-180/day.  
+**Fix:** Added detailed LLM usage breakdown in [Consolidation Engine](#7-consolidation-engine). Most cases (ADD, MERGE) use zero LLM.
+
+### Gap 3: Summary Generation Was Vague
+**First draft:** Implied every memory needs a new LLM summary. ❌  
+**Reality:** That's expensive. Most memories are fine with the raw `object` text.  
+**Fix:** Three options (A/B/C) — start with Option A (no summaries, use raw text). See Section 7.3.
+
+### Gap 4: No Entity Type at Extraction Time
+**First draft:** Proposed changing extractor prompt immediately. ❌  
+**Reality:** Prompt changes risk degrading extraction quality. Current triples are acceptable.  
+**Fix:** Entity typing happens in consolidation, not extraction. Extractor stays unchanged for Phase 1.
+
+### Gap 5: Feedback Loop Required AI
+**First draft:** Suggested comparing injection to response using LLM. ❌  
+**Reality:** Violates "no AI at query time" principle.  
+**Fix:** Keyword-overlap heuristic. Imperfect but free. See [Feedback Loop](#13-feedback-loop).
+
+### Gap 6: No Fallback Strategy
+**First draft:** Search Layer 2 only. ❌ What if Layer 2 is empty or corrupted?  
+**Fix:** Fallback to Layer 1 raw search if Layer 2 fails or returns no results.
+
+### Gap 7: Entity Matching Was Undefined
+**First draft:** "Group by entity" sounds simple. ❌  
+**Reality:** Needs a specific algorithm (entity name normalization, alias handling).  
+**Fix:** Added heuristic flow in Section 8.1 with clear thresholds (sim > 0.9 = merge, sim < 0.3 = contradiction).
+
+### Gap 8: Profiles Were Just Another Memory Type
+**First draft:** Profiles would be stored alongside regular memories. ❌  
+**Reality:** Profiles need separate management — caps, versioning, rollback. Entangling them with regular memories is messy.  **Fix:** Separate `tmr_profiles` collection with explicit anti-bloat rules.
+
+### Gap 9: Scoring Was Too Complex
+**First draft:** Had convoluted multi-factor formula with weights that weren't justified. ❌  **Reality:** Equal weights (25% each) for 4 factors is fine. Complexity doesn't improve discrimination.  **Fix:** Simplified to 4 factors × 25% each. Easy to tune.
+
+### Gap 10: Timezones and DST
+**First draft:** Used naive timestamp math. ❌ Will break in June when DST hits.  **Reality:** Need UTC everywhere, convert to local time only for display.  **Fix:** All timestamps stored as UTC ISO-8601.
+
+### Gap 11: What Happens If Consolidation Crashes?
+**First draft:** No recovery plan. ❌  **Reality:** If a cycle crashes, 2h of raw memories never consolidate.  **Fix:** Checkpoint tracking per cycle. Retry failed batches. Logging to identify which loop failed.
+
+### Gap 12: Testing Was Not Defined
+**First draft:** Jumped to implementation. ❌  **Reality:** Can't measure improvement if we don't have tests.  **Fix:** Added specific testing strategy in Section 19.
+
+### Gap 13: Phase 3 Was Undefined
+**First draft:** Jumped from Phase 1 → Phase 4 with no Phase 3. ❌  **Reality:** Vague phases = missed features.  **Fix:** 4 clear phases, each with exit criteria.
+
+---
+
+## 16. MIGRATION PATH
+
+### Step 1: Rename Collections (One-Time)
+
+```python
+# During V2 setup
+from qdrant_client import QdrantClient
+
+client = QdrantClient(...)
+
+# Rename existing V1 collections
+client.update_collection(
+    collection_name="tmr_knowledge_graph",
+    new_name="tmr_knowledge_graph_raw"
+)
+client.update_collection(
+    collection_name="tmr_semantic_vectors",
+    new_name="tmr_semantic_vectors_raw"
+)
+
+# Create new Layer 2 collections
+client.create_collection("tmr_consolidated_graph", ...)
+client.create_collection("tmr_consolidated_vectors", ...)
+```
+
+### Step 2: Initial Consolidation
+
+After renaming, run one-shot consolidation on ALL existing raw data:
+
+```python
+# Migration script
+raw_memories = client.scroll("tmr_knowledge_graph_raw", limit=10000)
+for batch in chunks_of(raw_memories, 100):
+    consolidate(batch)  # Reuses normal consolidation logic
+    write_to("tmr_consolidated_graph")
+```
+
+**Expected runtime:** ~2-3 hours for ~5,000 existing memories.  
+**Downtime:** Zero. V1 injection keeps working until V2 is ready.
+
+### Step 3: Flip Injection to Layer 2
+
+```python
+# In tmr_injector.py
+class TMRInjector:
+    def search(self, query):
+        # Try Layer 2 first
+        results = search_layer2(query)
+        
+        # Fallback if nothing found
+        if not results:
+            results = search_layer1_raw(query)
+        
+        return results
+```
+
+### Step 4: Clean Up V1 References
+
+After 48 hours of stable V2 operation, mark V1 collections as deprecated.
+
+---
+
+## 17. COST ANALYSIS
+
+### Current V1 Daily Cost
+
+| Component | Calls/Day | Cost |
+|-----------|:---------:|------|
+| Extraction (Qwen) | 12 cron cycles × ~8 calls | Base cost (fixed) |
+| **Total V1** | ~96 | Baseline |
+
+### V2 Additional Daily Cost
+
+| Component | Calls/Day | Cases |
+|-----------|:---------:|------|
+| Consolidation (ADD/MERGE — heuristic) | 0 | 85-90% of memories |
+| Consolidation (conflict resolution) | ~10-30 | ~5% of memories |
+| Summary generation (Phase 1: no) | 0 | Skipped |
+| Profile updates | ~5-10 | Daily refresh |
+| **Total V2 Extra** | ~15-40 | Small vs Cognee's per-query model |
+
+### Cost Comparison
+
+| System | AI Calls at Query Time? | AI Calls/Day (100 queries) |
+|--------|:-----------------------:|:--------------------------:|
+| **V2 (ours)** | None | ~180 (all in background) |
+| **Cognee** | Yes — every search | ~300 (background + per-query) |
+| **Mem0** | Yes — per query | ~100 user + per-query |
+
+**Key advantage:** V2 runs the same cost regardless of query volume. Cognee gets more expensive as traffic scales.
+
+---
+
+## 18. ERROR HANDLING & ROLLBACK
+
+### Failure Modes
+
+| Failure | Recovery Action | Rollback Plan |
+|---------|----------------|---------------|
+| Extraction crash | Retry next cron cycle | Re-run same batch |
+| Consolidation crash | Skip this cycle, retry next | Re-process from checkpoint |
+| LLM down during conflict resolution | Fall back to heuristic (newer wins) | N/A — safe default |
+| Layer 2 corruption | Regenerate from Layer 1 | Full rebuild, single command |
+| Query-time crash (V2 → Layer 2) | Fallback to Layer 1 (V1 format) | Immediate, transparent |
+| Profile bloat | Auto-trim oldest entries | Rebuild from scratch if needed |
+
+### Recovery Script
+
+```python
+#!/usr/bin/env python3
+# scripts/v2_disaster_recovery.py
+"""
+If Layer 2 is corrupted, rebuild from immutable Layer 1.
+Usage: python v2_disaster_recovery.py --clean-slate
+"""
+
+if __name__ == "__main__":
+    # 1. Backup current Layer 2 (just in case)
+    backup_collection("tmr_consolidated_graph")
+    
+    # 2. Clear Layer 2
+    delete_collection("tmr_consolidated_graph")
+    delete_collection("tmr_consolidated_vectors")
+    
+    # 3. Rebuild from Layer 1 — every single raw memory
+    raw = scroll_all("tmr_knowledge_graph_raw")
+    consolidate_all(raw)
+    
+    # 4. Verify checksums
+    assert count(L2) >= count(L1)  # Some merges reduce count slightly
+```
+
+---
+
+## 19. TESTING STRATEGY
+
+| Test | What It Validates | How |
+|------|------------------|-----|
+| **Consolidation smoke** | Engine doesn't crash | Run on 100 sample triples |
+| **Scoring threshold** | Tier 1/2/3 separation works | Hand-label 30 memories, verify scoring order |
+| **Conflict resolution** | Contradictions are caught | Feed "User prefers X" + "User prefers Y" → verify SUPERSEDE |
+| **Migration** | Data integrity across layers | Count L1 before migration = count L1 after migration |
+| **Fatigue test** | 1000-memory batch | Run overnight on synthetic data |
+| **Injection format** | No missing fields | Parse output with strict JSON schema |
+| **Fallback** | Layer 2 failure → Layer 1 works | Delete L2, verify query still returns results |
+
+**Exit Criteria for Phase 1 → Phase 2:**
+- Zero migration errors
+- Scoring produces at least 20% of memories in Tier 1 and 30% in Tier 3
+- Conflict resolution correctly handles 90%+ of contradiction test cases
+
+---
+
+## 20. IMPLEMENTATION PLAN
 
 ### Phase 1: Foundation (Week 1)
 
-**Goal**: Set up the two-layer infrastructure without changing extraction.
+**Goal:** Two layers exist, scoring works, zero AI at query time.
 
-1. **Create new Qdrant collections**
-   - `tmr_consolidated_graph` (size=1)
-   - `tmr_consolidated_vectors` (size=768)
-   - Rename existing: `tmr_knowledge_graph` → `tmr_knowledge_graph_raw`
+| Task | File | Effort |
+|------|------|--------|
+| Rename V1 collections + create L2 collections | `src/qdrant_manager.py` | 2h |
+| Build consolidation engine (ADD/MERGE/SUPERSEDE heuristics) | `src/consolidation_engine.py` | 1d |
+| Implement scoring (4-factor math) | `src/consolidation_engine.py` | 4h |
+| Update injection to search Layer 2 + fallback to L1 | `src/tmr_injector.py` | 4h |
+| Migrate existing data from L1 → L2 | `scripts/migrate_to_v2.py` | 4h |
+| Add injection tracking (no AI) | `src/feedback_loop.py` | 2h |
+| Testing | `tests/` | 4h |
 
-2. **Build Consolidation Engine skeleton**
-   - `src/consolidation_engine.py`
-   - Phase 1: Entity matching (group raw memories by entity)
-   - Phase 5: Score computation (dynamic confidence)
+**Exit criteria:** All existing V1 data visible via Layer 2 search. No injection errors.
 
-3. **Basic copy**: Copy all raw memories to Layer 2 with default scores
+### Phase 2: Conflict Resolution + Profiles (Week 2)
 
-**Deliverable**: Two layers exist, Layer 2 is a direct copy of Layer 1
+**Goal:** LLM resolves real conflicts, profiles exist.
 
-### Phase 2: Conflict Resolution (Week 2)
+| Task | File | Effort |
+|------|------|--------|
+| LLM conflict resolution (ambiguous cases only) | `src/consolidation_engine.py` | 1d |
+| Profile schema + store | `src/profile_manager.py` | 4h |
+| Daily profile update cron | `scripts/update_profiles.py` | 4h |
+| Profile injection templates | `src/tmr_injector.py` | 4h |
+| Feedback loop application (demotion/boosting) | `src/feedback_loop.py` | 2h |
 
-**Goal**: Add ADD/UPDATE/DELETE/MERGE/SUPERSEDE logic.
+**Exit criteria:** 95% of conflicts resolved correctly. Profiles inject naturally.
 
-1. **Implement conflict detection**
-   - Entity matching within groups
-   - Semantic similarity comparison
-   - Contradiction flagging
+### Phase 3: Richer Format + Summary Generation (Week 3)
 
-2. **Implement conflict resolution**
-   - LLM call for conflict operations
-   - State machine (current → superseded → expired)
+**Goal:** Prettier injection, summaries from LLM when needed.
 
-3. **Temporal tracking**
-   - Creation timestamps
-   - Last-referenced updates
-   - Expiry policy
+| Task | Effort |
+|------|--------|
+| Summary generation during consolidation (Option B) | 1d |
+| Entity typing in extraction (optional extractor prompt update) | 1d (A/B test first) |
+| Improved injection format (badges, nice layout) | 4h |
 
-**Deliverable**: Consolidation engine resolves conflicts, tracks state changes
+### Phase 4: Polish + Evaluation (Week 4)
 
-### Phase 3: Richer Extraction (Week 3)
+**Goal:** Compare V1 vs V2 injection quality.
 
-**Goal**: Improve raw extraction quality for better consolidation.
-
-1. **Update Qwen extractor prompt**
-   - Entity type classification
-   - Importance scoring at extraction time
-   - Richer relation types (PREFERS, WORKS_ON, etc.)
-
-2. **Summary generation**
-   - LLM generates human-readable summaries during consolidation
-
-**Deliverable**: Raw memories have entity types, importance scores, and summaries
-
-### Phase 4: Improved Injection (Week 4)
-
-**Goal**: Use Layer 2 for injection with dynamic scoring and auto-feedback.
-
-1. **Update injection pipeline**
-   - Search Layer 2 instead of Layer 1
-   - New injection format (entity badges, rich summaries)
-   - Dynamic confidence scoring
-
-2. **Auto-feedback loop**
-   - Track which memories were injected
-   - Compare against actual response
-   - Update usage frequency scores
-
-**Deliverable**: Full two-layer injection with self-improvement
+| Task | Effort |
+|------|--------|
+| Logging + metrics collection | 4h |
+| Side-by-side injection comparison | 8h |
+| Performance benchmarks (latency) | 4h |
+| Documentation update | 4h |
 
 ---
 
-## 10. COMPARISON WITH OTHER SYSTEMS
+## 21. SYSTEM COMPARISON
 
-### 10.1 Mem0
-
-| Feature | Mem0 | TMR v3 |
-|---------|------|--------|
-| Extraction | LLM extracts facts from message pairs | Qwen extractor (unchanged) |
-| Memory management | ADD/UPDATE/DELETE/NOOP via LLM | Same, plus MERGE and SUPERSEDE |
-| Graph variant | Entities as nodes, edges as relationships | Same approach via entity typing |
-| Scoring | Criteria-based retrieval | Dynamic confidence with sub-scores |
-| Raw preservation | Not explicit | **Layer 1 is immutable** |
-| Latency | 0.71s median | Target: <1s |
-
-### 10.2 Zep
-
-| Feature | Zep | TMR v3 |
-|---------|-----|--------|
-| Temporal KG | Graphiti engine — state changes tracked | Temporal state machine (current/superseded/expired) |
-| Async processing | Background processing | Consolidation runs after extraction |
-| Message compression | Auto-summarizes old history | Summary generation during consolidation |
-| DMR benchmark | 94.8% | Not benchmarked (custom use case) |
-
-### 10.3 Letta (MemGPT)
-
-| Feature | Letta | TMR v3 |
-|---------|-------|--------|
-| Core memory | Always in context | Not applicable (different architecture) |
-| Archival memory | Searchable long-term | Layer 2 processed memory |
-| Agent-led memory | Agent decides what to remember | Consolidation engine decides |
-| Self-managing | Agent reads/writes own memory | Auto-feedback loop adjusts scores |
-
-### 10.4 Microsoft GraphRAG
-
-| Feature | GraphRAG | TMR v3 |
-|---------|----------|--------|
-| Community detection | Leiden algorithm | Not planned (document-level, not corpus-level) |
-| Summarization | Per-community summaries | Per-memory summaries |
-| Local search | Entity-specific | Entity-specific via typing |
-| Global search | Community-level themes | Not applicable (conversation memory, not document corpus) |
+| Feature | V1 (Current) | V2 (Design) | Cognee | Mem0 | MemMachine |
+|---------|:------------:|:-----------:|:------:|:----:|:----------:|
+| Layers | 1 (mixed) | 2 (raw+processed) | 2 (raw+enriched) | 2 (vector+graph) | 2 (episodic+profile) |
+| AI at query time | None ✅ | None ✅ | Yes ❌ | Yes ❌ | Yes ❌ |
+| AI cost | Fixed (cron) | Fixed + small (cron) | Per-query (scales) | Per-query (scales) | Per-query (scales) |
+| Conflict resolution | None | ✅ Heuristic + LLM fallback | ✅ Entity consolidation | ✅ LLM ADD/UPDATE | ✅ Ground-truth preserving |
+| Temporal tracking | None | ✅ Full state machine | ⚡ Partial | ⚡ Partial | ✅ Full |
+| Profile memory | None | ✅ User+Agent+Relationship | ⚡ User only | ✅ User only | ✅ User+Agent |
+| Relationship profile | None | ✅ Yes (ours only) | ❌ No | ❌ No | ❌ No (user only) |
+| Self-improving scoring | None | ✅ Usage-frequency heuristic | ⚡ Basic | ⚡ Basic | ✅ Retrieval agent |
+| Ground-truth preserved | No (mutates raw) | ✅ Yes (immutable L1) | ⚡ Raw is kept but enriched separately | ✅ Yes | ✅ Full episodes |
+| Open source | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Open core | ✅ Yes |
+| Scalability | Exhaustion | Chronological ordering | ✅ Incremental | ✅ Incremental | ✅ Incremental |
 
 ---
 
-## 11. GLOSSARY
+## 22. GLOSSARY
 
 | Term | Definition |
 |------|------------|
-| **Layer 1 (Raw)** | Immutable source of truth. Raw relations and embeddings from extraction. Never modified. |
-| **Layer 2 (Processed)** | Consolidated memory store. Handles conflict resolution, temporal tracking, scoring. Used for injection. |
-| **Consolidation Engine** | Component that processes Layer 1 into Layer 2. Runs after each extraction cycle. |
-| **Entity Typing** | Categorizing entities (person, project, preference, etc.) for better search and scoring. |
-| **Temporal State** | Current / Superseded / Expired — tracks whether a memory is still relevant. |
-| **Conflict Resolution** | Process of detecting and resolving contradictions between memories (ADD/UPDATE/DELETE/MERGE/SUPERSEDE/NOOP). |
-| **Dynamic Scoring** | Confidence score with sub-scores (recency, specificity, source quality, usage frequency). |
-| **Auto-Feedback** | Self-improvement loop that adjusts memory scores based on injection usefulness. |
-| **Tiered Injection** | Three-tier output: Tier 1 (full summary), Tier 2 (reference only), Tier 3 (skipped). |
+| **Layer 1** | **Raw Memory** — immutable source of truth. All extraction output lives here forever. |
+| **Layer 2** | **Processed Memory** — consolidated, scored, temporal. What gets injected into context. |
+| **Consolidation Engine** | Background process that turns Layer 1 → Layer 2. Handles conflicts, scoring, expiry. |
+| **Profile Memory** | Three structured objects (user, agent, relationship) that capture personality + dynamic. |
+| **Conflict Resolution** | Process of deciding what to do when new memory contradicts old: ADD/MERGE/SUPERSEDE. |
+| **Supercede** | When newer info makes old info outdated. Old marked `superseded`, new marked `current`. |
+| **Expired** | Memory marked as too old for active injection. Not deleted — just hidden. |
+| **Entity Typing** | Classifying memories into types: preference, fact, event, instruction, discussion. |
+| **Usage Frequency** | Score tracking how often an injected memory actually contributes to responses. |
+| **Feedback Loop** | System that adjusts memory scores based on whether they were useful in practice. |
+| **No AI at query time** | The principle that search/score/format use math only — zero LLM calls per query. |
+| **Ground-truth preserving** | Raw copy is immutable. Processed layer is derived, disposable, rebuildable. |
 
 ---
 
-## APPENDIX A: File Structure
-
-```
-~/.openclaw/extensions/TrueMemoryRecall/
-├── documentation/
-│   ├── v1/                          # V2 docs (legacy)
-│   │   ├── FINAL_DOCUMENTATION.md
-│   │   ├── PLAN_VS_REALITY.md
-│   │   ├── REALTIME_ENHANCEMENT.md
-│   │   ├── CHANGES_BEYOND_PLAN.md
-│   │   ├── PHASE5_INTEGRATION_SUMMARY.md
-│   │   ├── SEMANTIC_SEARCH_SUMMARY.md
-│   │   ├── README.md
-│   │   ├── TMR-v2-Session-Checkpoint-2026-03-18.md
-│   │   └── TMR-v2-Session-Checkpoint.md
-│   ├── v2/                          # V3 design docs
-│   │   └── DOCUMENTATION_V2.md      ← This file
-│   └── decisions/                   # Key architectural decisions (future)
-├── src/
-│   ├── embedder.py                  # Unchanged
-│   ├── extractor.py                 # Updated for richer extraction (Phase 3)
-│   ├── qdrant_manager.py            # Updated for two-layer collections
-│   ├── tmr_injector.py              # Updated for Layer 2 search + new format
-│   ├── consolidation_engine.py      # NEW: Consolidation Engine
-│   ├── intent_classifier.py         # Unchanged
-│   ├── query_planner.py             # Unchanged
-│   ├── graph_traversal.py           # Unchanged
-│   ├── feedback_loop.py             # Updated for auto-feedback
-│   └── ...
-├── scripts/
-│   └── incremental_extractor.py     # Updated to trigger consolidation
-└── ...
-```
-
-## APPENDIX B: Key Metrics to Track
-
-| Metric | Target | How to Measure |
-|--------|--------|----------------|
-| Injection relevance | >0.75 avg | User feedback score after each response |
-| False positive rate | <20% | Memories injected but not useful |
-| Consolidation latency | <5s per cycle | Time to process new raw memories |
-| Layer 2 rebuild time | <60s for full rebuild | Time to regenerate from Layer 1 |
-| Memory discrimination | >0.3 std dev in scores | Standard deviation of confidence scores |
-| Conflict resolution accuracy | >80% | Manual audit of resolved conflicts |
-
----
-
-**Documentation Version:** 3.0 (Design)  
+**Document Version:** 2.0 (Post-Scrutiny)  
 **Last Updated:** 2026-05-09  
 **Author:** Liz 🦎  
-**Status:** Design Phase — pending implementation
+**Branch:** `v2-design`  
+**Status:** Ready for Phase 1 implementation
